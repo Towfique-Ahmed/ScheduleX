@@ -14,6 +14,7 @@ import { startScheduler } from './scheduler.ts';
 import { data, mediaDir, save, Platform, StoredAccount, StoredMedia, StoredPost, User } from './store.ts';
 
 const app = express();
+if (config.trustProxy !== false) app.set('trust proxy', config.trustProxy);
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', sessionMiddleware, originCheck);
 
@@ -175,9 +176,13 @@ app.get('/api/media', (_req, res) => res.json(data().media.map(publicMedia)));
 app.post('/api/media', requireRole(can.draft), express.raw({ type: ['image/*', 'video/*'], limit: '25mb' }), (req, res) => {
   const body = req.body as Buffer;
   if (!Buffer.isBuffer(body) || body.length === 0) return res.status(400).json({ error: 'No file received' });
+  if (data().media.reduce((n, m) => n + m.size, 0) + body.length > config.maxMediaBytes) {
+    return res.status(413).json({ error: 'The media library is full. Delete files you no longer need.' });
+  }
   const mime = sniffMime(body);
   if (!mime) return res.status(415).json({ error: 'Unsupported file. Upload a JPG, PNG, GIF, WebP or MP4.' });
-  const raw = decodeURIComponent(String(req.header('x-filename') ?? 'upload'));
+  let raw = 'upload';
+  try { raw = decodeURIComponent(String(req.header('x-filename') ?? 'upload')); } catch { /* malformed escape: keep the default name */ }
   const originalName = raw.replace(/[^\w.\- ]+/g, '_').slice(0, 120) || 'upload';
   const id = crypto.randomUUID();
   const filename = `${id}.${MIME_EXT[mime]}`;
@@ -193,8 +198,12 @@ app.delete('/api/media/:id', requireRole(can.deleteMedia), (req, res) => {
   const db = data();
   const idx = db.media.findIndex(m => m.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  if (db.posts.some(p => p.status !== 'published' && p.mediaIds.includes(String(req.params.id)))) {
+  const usedBy = db.posts.filter(p => p.mediaIds.includes(String(req.params.id)));
+  if (usedBy.some(p => p.status !== 'published')) {
     return res.status(409).json({ error: 'This file is attached to a draft or scheduled post.' });
+  }
+  if (usedBy.some(p => p.evergreen)) {
+    return res.status(409).json({ error: 'This file is used by an evergreen post that will be posted again. Stop recycling it first.' });
   }
   const [m] = db.media.splice(idx, 1);
   fs.rmSync(path.join(mediaDir, m.filename), { force: true });
@@ -250,22 +259,24 @@ app.put('/api/slots', requireRole(can.manageSlots), (req, res) => {
 
 // ---- Analytics, reports, inbox ------------------------------------------------------------
 const rangeDays = (v: unknown) => [7, 30, 90].includes(Number(v)) ? Number(v) : 30;
+/** Browser time-zone offset in minutes (Date.getTimezoneOffset), so day buckets match what the user sees. */
+const tzOf = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && Math.abs(n) <= 840 ? n : 0; };
 
 app.get('/api/analytics', (req, res) => {
   const days = rangeDays(req.query.days);
-  res.json({ days, publishing: publishingStats(days), audience: audience(days) });
+  res.json({ days, publishing: publishingStats(days, tzOf(req.query.tz)), audience: audience(days) });
 });
 
 app.post('/api/analytics/refresh', requireRole(can.approve), async (req, res) => {
   await collectAllMetrics();
   const days = rangeDays(req.query.days);
-  res.json({ days, publishing: publishingStats(days), audience: audience(days) });
+  res.json({ days, publishing: publishingStats(days, tzOf(req.query.tz)), audience: audience(days) });
 });
 
 app.get('/api/reports/summary.csv', requireRole(can.approve), (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="scheduleX-report-${new Date().toISOString().slice(0, 10)}.csv"`);
-  res.send(reportCsv(rangeDays(req.query.days)));
+  res.send(reportCsv(rangeDays(req.query.days), tzOf(req.query.tz)));
 });
 
 app.get('/api/inbox', requireRole(can.approve), (_req, res) => {
@@ -378,7 +389,7 @@ app.post('/api/posts', async (req, res) => {
   if (!can.draft(user.role)) return res.status(403).json({ error: 'Viewers cannot create posts' });
   if ((action === 'schedule' || action === 'publish') && !can.publishDirectly(user.role)) return res.status(403).json({ error: DIRECT });
 
-  const parsed = parseFields({ mediaIds: [], categoryId: null, evergreen: null, accounts: [], ...body });
+  const parsed = parseFields({ content: '', mediaIds: [], categoryId: null, evergreen: null, accounts: [], ...body });
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
   const f = parsed.fields as PostFields;
   if (action !== 'draft' && f.accounts.length === 0) return res.status(400).json({ error: 'Select at least one connected account' });
@@ -420,6 +431,15 @@ app.patch('/api/posts/:id', async (req, res) => {
   const user = userFrom(res);
   const post = data().posts.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Not found' });
+  if (post.status === 'published' && Object.keys(req.body ?? {}).join() === 'evergreen' && req.body.evergreen === null) {
+    // The one change allowed on a published post: stop it (and every copy in its recycling chain) being posted again.
+    if (!can.publishDirectly(user.role)) return res.status(403).json({ error: DIRECT });
+    const root = (p: StoredPost): string => { const parent = p.recycledFrom && data().posts.find(x => x.id === p.recycledFrom); return parent ? root(parent) : p.id; };
+    const chain = root(post);
+    for (const p of data().posts) if (root(p) === chain) p.evergreen = null;
+    save();
+    return res.json(post);
+  }
   if (post.status === 'published' || post.status === 'publishing') return res.status(409).json({ error: 'Published posts cannot be edited' });
   if (post.status === 'pending_approval') return res.status(409).json({ error: 'This post is waiting for approval. Withdraw it to edit.' });
 
@@ -547,6 +567,14 @@ app.delete('/api/posts/:id', (req, res) => {
   db.posts.splice(idx, 1);
   save();
   res.status(204).end();
+});
+
+// Errors (malformed JSON, oversized bodies, bugs) get a short JSON message, never a stack trace.
+app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) return next(err);
+  const status = Number(err?.status ?? err?.statusCode) || 500;
+  if (status >= 500) console.error('[api]', err);
+  res.status(status).json({ error: status === 413 ? 'That request is too large.' : status < 500 ? 'Invalid request.' : 'Something went wrong.' });
 });
 
 // Serve the built web app (`npm run build`) so one process runs everything in production.

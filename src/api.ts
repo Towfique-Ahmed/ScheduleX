@@ -48,8 +48,8 @@ export const api = {
   createInvite: (role: Role) => request<Invite & { url: string }>('/api/invites', json('POST', { role })),
   deleteInvite: (id: string) => request<void>(`/api/invites/${id}`, { method: 'DELETE' }),
 
-  analytics: (days: number) => request<AnalyticsReport>(`/api/analytics?days=${days}`),
-  refreshAnalytics: (days: number) => request<AnalyticsReport>(`/api/analytics/refresh?days=${days}`, { method: 'POST' }),
+  analytics: (days: number) => request<AnalyticsReport>(`/api/analytics?days=${days}&tz=${new Date().getTimezoneOffset()}`),
+  refreshAnalytics: (days: number) => request<AnalyticsReport>(`/api/analytics/refresh?days=${days}&tz=${new Date().getTimezoneOffset()}`, { method: 'POST' }),
   inbox: () => request<{ items: InboxItem[]; accounts: InboxAccount[] }>('/api/inbox'),
   refreshInbox: () => request<{ ok: true }>('/api/inbox/refresh', { method: 'POST' }),
   markRead: (id: string, read: boolean) => request<InboxItem>(`/api/inbox/${id}/read`, json('POST', { read })),

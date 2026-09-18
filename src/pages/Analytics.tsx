@@ -41,7 +41,7 @@ export default function Analytics() {
         </div>
         {can.approve && <>
           <button className="btn btn-sm btn-outline" onClick={refresh} disabled={refreshing}>{refreshing ? 'Refreshing…' : '↻ Refresh audience data'}</button>
-          <a className="btn btn-sm btn-outline" href={`/api/reports/summary.csv?days=${days}`}>⬇ Export CSV</a>
+          <a className="btn btn-sm btn-outline" href={`/api/reports/summary.csv?days=${days}&tz=${new Date().getTimezoneOffset()}`}>⬇ Export CSV</a>
         </>}
         <button className="btn btn-sm btn-outline" onClick={() => window.print()}>🖨 Print / PDF</button>
       </div>

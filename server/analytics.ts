@@ -3,7 +3,7 @@ import { providers } from './providers/index.ts';
 import { ProviderError } from './providers/types.ts';
 import { data, save, Platform, StoredAccount } from './store.ts';
 
-const dayOf = (d: Date) => d.toISOString().slice(0, 10);
+const dayOf = (d: Date, tzOffsetMin = 0) => new Date(d.getTime() - tzOffsetMin * 60_000).toISOString().slice(0, 10);
 
 /** Fetches audience numbers for one account and stores today's snapshot. */
 export async function collectMetrics(account: StoredAccount): Promise<void> {
@@ -33,11 +33,11 @@ export async function collectAllMetrics() {
 // ---- Reporting ----------------------------------------------------------------------------
 export interface PlatformRow { platform: Platform; published: number; failed: number }
 
-export function publishingStats(days: number) {
+export function publishingStats(days: number, tz = 0) {
   const db = data();
   const since = Date.now() - days * 86400_000;
   const byDay = new Map<string, { published: number; failed: number }>();
-  for (let i = days - 1; i >= 0; i--) byDay.set(dayOf(new Date(Date.now() - i * 86400_000)), { published: 0, failed: 0 });
+  for (let i = days - 1; i >= 0; i--) byDay.set(dayOf(new Date(Date.now() - i * 86400_000), tz), { published: 0, failed: 0 });
   const byPlatform = new Map<Platform, PlatformRow>();
   const byCategory = new Map<string, number>();
   let published = 0, failed = 0;
@@ -49,7 +49,7 @@ export function publishingStats(days: number) {
       const platform = db.accounts.find(a => a.id === r.accountId)?.platform;
       if (!platform) continue;
       const row = byPlatform.get(platform) ?? { platform, published: 0, failed: 0 };
-      const day = byDay.get(dayOf(when));
+      const day = byDay.get(dayOf(when, tz));
       if (r.status === 'published') { published++; row.published++; if (day) day.published++; if (post.categoryId) byCategory.set(post.categoryId, (byCategory.get(post.categoryId) ?? 0) + 1); }
       else { failed++; row.failed++; if (day) day.failed++; }
       byPlatform.set(platform, row);
@@ -89,13 +89,14 @@ export function audience(days: number) {
 /** Escapes a CSV cell and defuses spreadsheet formulas (=, +, -, @ at the start) from user content. */
 const cell = (v: unknown) => {
   let s = v === null || v === undefined ? '' : String(v);
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  // Only text can be a formula; real numbers (e.g. a follower change of -5) must stay numeric.
+  if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 export const csvRow = (cols: unknown[]) => cols.map(cell).join(',');
 
-export function reportCsv(days: number): string {
-  const stats = publishingStats(days);
+export function reportCsv(days: number, tz = 0): string {
+  const stats = publishingStats(days, tz);
   const aud = audience(days);
   const db = data();
   const lines: string[] = [];

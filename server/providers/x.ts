@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { LocalMedia, Provider, ProviderError, readJson } from './types.ts';
+import { isDeadGrant, LocalMedia, Provider, ProviderError, readJson } from './types.ts';
 
 const clientId = () => process.env.X_CLIENT_ID ?? '';
 const clientSecret = () => process.env.X_CLIENT_SECRET ?? '';
@@ -14,7 +14,7 @@ function tokenRequest(body: Record<string, string>) {
 
 async function toTokens(res: Response) {
   const json = await readJson(res);
-  if (!res.ok) throw new ProviderError(`X token request failed: ${json.error_description ?? json.error ?? res.status}`, true);
+  if (!res.ok) throw new ProviderError(`X token request failed: ${json.error_description ?? json.error ?? res.status}`, isDeadGrant(res.status));
   return { accessToken: json.access_token, refreshToken: json.refresh_token ?? null, expiresIn: json.expires_in ?? null };
 }
 

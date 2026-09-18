@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6', '#64748b'];
 
 export default function Categories() {
-  const { categories, posts, createCategory, deleteCategory } = useApp();
+  const { categories, posts, createCategory, deleteCategory, updatePost, refresh } = useApp();
   const { can } = useAuth();
   const [name, setName] = useState('');
   const [color, setColor] = useState(PALETTE[0]);
@@ -17,7 +17,8 @@ export default function Categories() {
     catch (err) { setError(err instanceof Error ? err.message : 'Could not create category'); }
   };
 
-  const evergreen = posts.filter(p => p.evergreen && p.status !== 'draft' && !p.recycledFrom);
+  // One row per recycling chain: its latest copy (the one that will be re-posted next).
+  const evergreen = posts.filter(p => p.evergreen && p.status !== 'draft' && !p.recycledAt);
 
   return (
     <div>
@@ -68,6 +69,9 @@ export default function Categories() {
               <li key={p.id}>
                 <span className="cat-name">{p.content.slice(0, 70)}</span>
                 <span className="cat-count">every {p.evergreen!.everyDays} days</span>
+                {can.manageCategories && (
+                  <button className="btn btn-sm btn-outline" onClick={() => void updatePost(p.id, { evergreen: null }).then(refresh).catch(e => setError(e instanceof Error ? e.message : 'Failed'))}>Stop recycling</button>
+                )}
               </li>
             ))}
           </ul>

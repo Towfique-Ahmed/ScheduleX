@@ -20,7 +20,7 @@ export default function Accounts() {
     if (!connected && !error) return;
     setNotice(connected
       ? { kind: 'success', text: `${count > 1 ? `${count} ` : ''}${platformConfig[connected as keyof typeof platformConfig]?.name ?? connected} account${count > 1 ? 's' : ''} connected.` }
-      : { kind: 'error', text: error! });
+      : { kind: 'error', text: `Connection problem: ${error!.slice(0, 300)}` });
     setParams({}, { replace: true });
     void refresh();
   }, [params, setParams, refresh]);

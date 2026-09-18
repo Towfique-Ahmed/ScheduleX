@@ -66,6 +66,7 @@ export interface Post {
   categoryId: string | null;
   evergreen: { everyDays: number } | null;
   recycledFrom: string | null;
+  recycledAt: string | null;
   results: PublishResult[];
   createdAt: string;
   createdBy: string | null;

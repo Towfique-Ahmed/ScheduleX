@@ -6,6 +6,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? '127.0.0.1',
+  // Number of reverse proxies in front of the server (so req.ip is the real client). Leave unset when not behind one.
+  trustProxy: process.env.TRUST_PROXY ? Number(process.env.TRUST_PROXY) : false,
+  maxMediaBytes: Number(process.env.MAX_MEDIA_MB ?? 2048) * 1024 * 1024,
   // Origin the browser uses (the Vite dev server proxies /api to this server).
   // OAuth redirect URIs registered with each platform must be `${appUrl}/api/auth/<provider>/callback`.
   appUrl: (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, ''),

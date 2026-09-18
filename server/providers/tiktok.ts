@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { Provider, ProviderError, readJson } from './types.ts';
+import { isDeadGrant, Provider, ProviderError, readJson } from './types.ts';
 
 const key = () => process.env.TIKTOK_CLIENT_KEY ?? '';
 const secret = () => process.env.TIKTOK_CLIENT_SECRET ?? '';
@@ -13,7 +13,7 @@ async function tokenRequest(body: Record<string, string>) {
     body: new URLSearchParams({ client_key: key(), client_secret: secret(), ...body }),
   });
   const json = await readJson(res);
-  if (!res.ok || json.error) throw new ProviderError(`TikTok token request failed: ${json.error_description ?? json.error ?? res.status}`, true);
+  if (!res.ok || json.error) throw new ProviderError(`TikTok token request failed: ${json.error_description ?? json.error ?? res.status}`, isDeadGrant(res.status));
   return { accessToken: json.access_token as string, refreshToken: (json.refresh_token as string) ?? null, expiresIn: (json.expires_in as number) ?? null };
 }
 

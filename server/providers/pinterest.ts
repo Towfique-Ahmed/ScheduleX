@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { ConnectedAccount, Provider, ProviderError, readJson } from './types.ts';
+import { ConnectedAccount, isDeadGrant, Provider, ProviderError, readJson } from './types.ts';
 
 const id = () => process.env.PINTEREST_APP_ID ?? '';
 const secret = () => process.env.PINTEREST_APP_SECRET ?? '';
@@ -13,7 +13,7 @@ async function tokenRequest(body: Record<string, string>) {
     body: new URLSearchParams(body),
   });
   const json = await readJson(res);
-  if (!res.ok) throw new ProviderError(`Pinterest token request failed: ${json.message ?? res.status}`, true);
+  if (!res.ok) throw new ProviderError(`Pinterest token request failed: ${json.message ?? res.status}`, isDeadGrant(res.status));
   return { accessToken: json.access_token as string, refreshToken: (json.refresh_token as string) ?? null, expiresIn: (json.expires_in as number) ?? null };
 }
 

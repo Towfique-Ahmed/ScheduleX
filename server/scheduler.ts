@@ -2,7 +2,7 @@ import { publishPost } from './publisher.ts';
 import crypto from 'node:crypto';
 import { collectAllMetrics } from './analytics.ts';
 import { fetchAllInboxes } from './inbox.ts';
-import { data, save } from './store.ts';
+import { data, save, StoredPost } from './store.ts';
 
 let running = false;
 
@@ -23,6 +23,7 @@ export function recycleEvergreen(now = Date.now()) {
       results: [],
       recycledAt: null,
       recycledFrom: post.id,
+      approval: null,
       createdAt: new Date(now).toISOString(),
     });
     post.recycledAt = new Date(now).toISOString();
@@ -36,9 +37,15 @@ async function tick() {
   running = true;
   try {
     recycleEvergreen();
-    const now = Date.now();
-    const due = data().posts.filter(p => p.status === 'scheduled' && p.scheduledAt && new Date(p.scheduledAt).getTime() <= now);
-    for (const post of due) await publishPost(post);
+    // A scheduled post with no time means "as soon as possible" (publish-now, approval, or one interrupted by a restart).
+    const isDue = (p: StoredPost) =>
+      p.status === 'scheduled' && (!p.scheduledAt || new Date(p.scheduledAt).getTime() <= Date.now());
+    const due = data().posts.filter(isDue);
+    for (const post of due) {
+      // Publishing one post can take a while; re-check that this one wasn't edited, withdrawn or deleted meanwhile.
+      if (!data().posts.includes(post) || !isDue(post)) continue;
+      await publishPost(post);
+    }
   } catch (err) {
     console.error('[scheduler]', err);
   } finally {

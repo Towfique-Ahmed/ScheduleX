@@ -100,3 +100,9 @@ export async function readJson(res: Response): Promise<any> {
     return { raw: text };
   }
 }
+
+/**
+ * A token endpoint rejecting the request with 4xx (except throttling/timeouts) means the grant is dead and
+ * the user must reconnect. 429, 5xx and network failures are transient and must not disconnect anyone.
+ */
+export const isDeadGrant = (status: number) => status >= 400 && status < 500 && status !== 429 && status !== 408;

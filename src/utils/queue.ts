@@ -24,10 +24,10 @@ export function upcomingSlots(slots: Slot[], from = new Date(), days = 60): Date
   return out;
 }
 
-/** Next slot that no other scheduled post already occupies (Buffer-style queue). */
+/** Next slot that no scheduled or awaiting-approval post already occupies (Buffer-style queue). */
 export function nextFreeSlot(slots: Slot[], posts: Post[], from = new Date()): Date | null {
   const taken = new Set(
-    posts.filter(p => p.status === 'scheduled' && p.scheduledAt).map(p => minuteKey(new Date(p.scheduledAt!))),
+    posts.filter(p => (p.status === 'scheduled' || p.status === 'pending_approval') && p.scheduledAt).map(p => minuteKey(new Date(p.scheduledAt!))),
   );
   return upcomingSlots(slots, from).find(d => !taken.has(minuteKey(d))) ?? null;
 }

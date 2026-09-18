@@ -12,17 +12,25 @@ const secure = config.appUrl.startsWith('https://');
 const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
 // ---- Passwords ------------------------------------------------------------------
-export function hashPassword(password: string): string {
+// scrypt runs on the libuv thread pool, so hashing never blocks the event loop (and the scheduler with it).
+const scrypt = (password: string, salt: Buffer, len: number) =>
+  new Promise<Buffer>((resolve, reject) => crypto.scrypt(password, salt, len, (err, key) => (err ? reject(err) : resolve(key))));
+
+export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16);
-  const hash = crypto.scryptSync(password, salt, 64);
-  return `${salt.toString('base64')}.${hash.toString('base64')}`;
+  return `${salt.toString('base64')}.${(await scrypt(password, salt, 64)).toString('base64')}`;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, hash] = stored.split('.').map(p => Buffer.from(p, 'base64'));
-  const test = crypto.scryptSync(password, salt, hash.length);
-  return crypto.timingSafeEqual(hash, test);
+  return crypto.timingSafeEqual(hash, await scrypt(password, salt, hash.length));
 }
+
+// Verified against when the email is unknown, so "no such user" costs exactly one scrypt like a real attempt.
+const DUMMY_HASH = (() => {
+  const salt = crypto.randomBytes(16);
+  return `${salt.toString('base64')}.${crypto.scryptSync('dummy-password', salt, 64).toString('base64')}`;
+})();
 
 const validPassword = (p: unknown): p is string => typeof p === 'string' && p.length >= 10 && p.length <= 200;
 const validEmail = (e: unknown): e is string => typeof e === 'string' && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e) && e.length <= 200;
@@ -99,14 +107,27 @@ export const requireRole = (check: (r: Role) => boolean, message = 'You do not h
 
 // ---- Login throttling ---------------------------------------------------------------
 const failures = new Map<string, { count: number; until: number }>();
-function throttled(key: string) {
-  const f = failures.get(key);
-  return !!f && f.count >= 8 && f.until > Date.now();
+const WINDOW_MS = 15 * 60_000;
+const LIMITS = { perEmail: 8, perIp: 30 };
+
+const throttleKeys = (ip: string | undefined, email: unknown) => [
+  { key: `ip|${ip}`, limit: LIMITS.perIp },
+  { key: `ip-email|${ip}|${String(email).toLowerCase()}`, limit: LIMITS.perEmail },
+];
+function throttled(keys: ReturnType<typeof throttleKeys>) {
+  return keys.some(({ key, limit }) => {
+    const f = failures.get(key);
+    return !!f && f.until > Date.now() && f.count >= limit;
+  });
 }
-function noteFailure(key: string) {
-  const f = failures.get(key);
-  if (!f || f.until < Date.now()) failures.set(key, { count: 1, until: Date.now() + 15 * 60_000 });
-  else f.count++;
+function noteFailure(keys: ReturnType<typeof throttleKeys>) {
+  const now = Date.now();
+  if (failures.size > 2000) for (const [k, v] of failures) if (v.until < now) failures.delete(k); // never grows without bound
+  for (const { key } of keys) {
+    const f = failures.get(key);
+    if (!f || f.until < now) failures.set(key, { count: 1, until: now + WINDOW_MS });
+    else f.count++;
+  }
 }
 
 // ---- Routes -------------------------------------------------------------------------
@@ -117,32 +138,31 @@ authRouter.get('/session', (_req, res) => {
   res.json({ user: user ? publicUser(user) : null, needsSetup: data().users.length === 0 });
 });
 
-authRouter.post('/session/signup', (req, res) => {
+authRouter.post('/session/signup', async (req, res) => {
   if (data().users.length > 0) return res.status(403).json({ error: 'Setup is already complete. Ask an admin for an invite.' });
   const { email, password } = req.body ?? {};
   const name = cleanName(req.body?.name);
   if (!name) return res.status(400).json({ error: 'Name is required' });
   if (!validEmail(email)) return res.status(400).json({ error: 'Enter a valid email' });
   if (!validPassword(password)) return res.status(400).json({ error: 'Password must be at least 10 characters' });
-  const user: User = { id: crypto.randomUUID(), email: email.toLowerCase(), name, passwordHash: hashPassword(password), role: 'owner', createdAt: new Date().toISOString() };
+  const user: User = { id: crypto.randomUUID(), email: email.toLowerCase(), name, passwordHash: await hashPassword(password), role: 'owner', createdAt: new Date().toISOString() };
   data().users.push(user);
   save();
   startSession(res, user.id);
   res.status(201).json({ user: publicUser(user) });
 });
 
-authRouter.post('/session/login', (req, res) => {
+authRouter.post('/session/login', async (req, res) => {
   const { email, password } = req.body ?? {};
-  const key = `${req.ip}|${String(email).toLowerCase()}`;
-  if (throttled(key)) return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
+  const keys = throttleKeys(req.ip, email);
+  if (throttled(keys)) return res.status(429).json({ error: 'Too many attempts. Try again in a few minutes.' });
   const user = validEmail(email) ? data().users.find(u => u.email === email.toLowerCase()) : undefined;
-  // Always run a hash comparison so response time doesn't reveal whether the account exists.
-  const ok = user ? verifyPassword(String(password ?? ''), user.passwordHash) : (verifyPassword('x', hashPassword('y')), false);
+  const ok = await verifyPassword(String(password ?? '').slice(0, 200), user?.passwordHash ?? DUMMY_HASH);
   if (!user || !ok) {
-    noteFailure(key);
+    noteFailure(keys);
     return res.status(401).json({ error: 'Incorrect email or password' });
   }
-  failures.delete(key);
+  failures.delete(keys[1].key);
   startSession(res, user.id);
   res.json({ user: publicUser(user) });
 });
@@ -164,7 +184,7 @@ authRouter.get('/session/invite/:token', (req, res) => {
   res.json({ role: inv.role });
 });
 
-authRouter.post('/session/accept-invite', (req, res) => {
+authRouter.post('/session/accept-invite', async (req, res) => {
   const { token, email, password } = req.body ?? {};
   const name = cleanName(req.body?.name);
   const inv = typeof token === 'string' ? findInvite(token) : undefined;
@@ -173,7 +193,7 @@ authRouter.post('/session/accept-invite', (req, res) => {
   if (!validEmail(email)) return res.status(400).json({ error: 'Enter a valid email' });
   if (!validPassword(password)) return res.status(400).json({ error: 'Password must be at least 10 characters' });
   if (data().users.some(u => u.email === email.toLowerCase())) return res.status(409).json({ error: 'An account with that email already exists' });
-  const user: User = { id: crypto.randomUUID(), email: email.toLowerCase(), name, passwordHash: hashPassword(password), role: inv.role, createdAt: new Date().toISOString() };
+  const user: User = { id: crypto.randomUUID(), email: email.toLowerCase(), name, passwordHash: await hashPassword(password), role: inv.role, createdAt: new Date().toISOString() };
   data().users.push(user);
   inv.usedAt = new Date().toISOString();
   save();
