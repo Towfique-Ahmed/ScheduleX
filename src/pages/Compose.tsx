@@ -4,14 +4,14 @@ import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
 import MediaPicker from '../components/MediaPicker';
 import MediaThumb from '../components/MediaThumb';
-import { platformConfig } from '../utils/platforms';
+import { mediaProblem, platformConfig } from '../utils/platforms';
 import { dayKey, nextFreeSlot } from '../utils/queue';
 
 type When = 'now' | 'later' | 'queue' | 'asap';
 
 export default function Compose() {
   const { id } = useParams();
-  const { accounts, posts, media, categories, slots, createPost, updatePost } = useApp();
+  const { accounts, posts, media, categories, slots, providers, createPost, updatePost } = useApp();
   const { can } = useAuth();
   const navigate = useNavigate();
   const editing = id ? posts.find(p => p.id === id) : undefined;
@@ -53,6 +53,7 @@ export default function Compose() {
   const selectedPlatforms = [...new Set(selected.map(a => a.platform))];
   const attached = mediaIds.map(mid => media.find(m => m.id === mid)).filter((m): m is NonNullable<typeof m> => !!m);
 
+  const mediaIssue = mediaProblem(selectedPlatforms, providers, attached);
   const limit = selectedPlatforms.length > 0 ? Math.min(...selectedPlatforms.map(p => platformConfig[p].maxChars)) : 280;
   const overLimit = content.length > limit;
 
@@ -243,12 +244,13 @@ export default function Compose() {
           </div>
 
           {error && <div className="notice notice-error" role="alert"><span>{error}</span></div>}
+          {mediaIssue && <div className="notice notice-error"><span>{mediaIssue} You can still save a draft.</span></div>}
           {overLimit && <div className="notice notice-error"><span>Over the {limit}-character limit for one of the selected platforms.</span></div>}
 
           <div className="compose-actions">
             <button className="btn btn-outline" onClick={() => submit('draft')} disabled={!content.trim() || submitting}>Save Draft</button>
             <button className="btn btn-primary" onClick={() => submit(action)}
-              disabled={!content.trim() || selected.length === 0 || overLimit || laterIncomplete || queueUnavailable || submitting}>
+              disabled={!content.trim() || selected.length === 0 || overLimit || !!mediaIssue || laterIncomplete || queueUnavailable || submitting}>
               {primaryLabel}
             </button>
           </div>

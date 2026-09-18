@@ -13,6 +13,11 @@ export interface Profile {
   avatar: string;
 }
 
+/** One connectable account. A single login can yield several (Facebook Pages, Pinterest boards). */
+export interface ConnectedAccount extends Tokens {
+  profile: Profile;
+}
+
 export interface Provider {
   id: Platform;
   name: string;
@@ -20,13 +25,17 @@ export interface Provider {
   envVars: string[];
   usesPkce: boolean;
   configured(): boolean;
-  authUrl(params: { state: string; challenge: string; redirectUri: string }): string;
+  authUrl(params: { state: string; challenge: string; verifier: string; redirectUri: string }): string;
   exchange(params: { code: string; verifier: string; redirectUri: string }): Promise<Tokens>;
   profile(accessToken: string): Promise<Profile>;
+  /** Overrides profile() when one login maps to several accounts, each with its own token. */
+  accounts?(tokens: Tokens): Promise<ConnectedAccount[]>;
   refresh?(refreshToken: string): Promise<Tokens>;
   /** MIME types this provider can attach. Empty means text-only. */
   mediaMimes: string[];
   maxMedia: number;
+  /** True when a post cannot be text-only (Instagram, TikTok, Pinterest). */
+  requiresMedia?: boolean;
   publish(params: {
     accessToken: string;
     externalId: string;
@@ -40,6 +49,8 @@ export interface LocalMedia {
   path: string;
   mime: string;
   name: string;
+  /** Publicly reachable URL, for platforms that pull media themselves (Instagram). Undefined when PUBLIC_URL isn't set. */
+  publicUrl?: string;
 }
 
 export class ProviderError extends Error {

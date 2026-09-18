@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { platformConfig } from '../utils/platforms';
+import { platformConfig, SETUP_NOTES } from '../utils/platforms';
 import { ProviderInfo } from '../types';
 
 export default function Accounts() {
@@ -16,9 +16,10 @@ export default function Accounts() {
   useEffect(() => {
     const connected = params.get('connected');
     const error = params.get('error');
+    const count = Number(params.get('count') ?? 1);
     if (!connected && !error) return;
     setNotice(connected
-      ? { kind: 'success', text: `${platformConfig[connected as keyof typeof platformConfig]?.name ?? connected} account connected.` }
+      ? { kind: 'success', text: `${count > 1 ? `${count} ` : ''}${platformConfig[connected as keyof typeof platformConfig]?.name ?? connected} account${count > 1 ? 's' : ''} connected.` }
       : { kind: 'error', text: error! });
     setParams({}, { replace: true });
     void refresh();
@@ -125,6 +126,9 @@ export default function Accounts() {
               </li>
               <li>Restart <code>npm run dev</code>, then click Connect account.</li>
             </ol>
+            {(SETUP_NOTES[setupFor.platform] ?? []).length > 0 && (
+              <ul className="setup-notes">{SETUP_NOTES[setupFor.platform]!.map(n => <li key={n}>{n}</li>)}</ul>
+            )}
             <p className="hint">See <code>.env.example</code> for the exact scopes and products each platform needs.</p>
           </div>
         </div>

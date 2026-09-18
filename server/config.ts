@@ -9,6 +9,9 @@ export const config = {
   // Origin the browser uses (the Vite dev server proxies /api to this server).
   // OAuth redirect URIs registered with each platform must be `${appUrl}/api/auth/<provider>/callback`.
   appUrl: (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+  // Public https origin of this server, only needed for Instagram (it downloads images from a URL).
+  publicUrl: (process.env.PUBLIC_URL ?? '').replace(/\/$/, ''),
+  graphVersion: process.env.META_GRAPH_VERSION ?? 'v23.0',
   dataDir: process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.resolve(here, 'data'),
   linkedinApiVersion: process.env.LINKEDIN_API_VERSION ?? '202601',
 };

@@ -59,7 +59,7 @@ app.get('/api/auth/:platform/start', (req, res) => {
   const verifier = b64url(crypto.randomBytes(48));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
   pending.set(state, { platform, verifier, userId: user.id, expires: Date.now() + 10 * 60 * 1000 });
-  res.redirect(provider.authUrl({ state, challenge, redirectUri: redirectUri(platform) }));
+  res.redirect(provider.authUrl({ state, challenge, verifier, redirectUri: redirectUri(platform) }));
 });
 
 app.get('/api/auth/:platform/callback', async (req, res) => {
@@ -78,26 +78,33 @@ app.get('/api/auth/:platform/callback', async (req, res) => {
 
   try {
     const tokens = await provider.exchange({ code, verifier: entry.verifier, redirectUri: redirectUri(platform) });
-    const profile = await provider.profile(tokens.accessToken);
-    const existing = data().accounts.find(a => a.platform === platform && a.externalId === profile.externalId);
-    const account: StoredAccount = existing ?? {
-      id: crypto.randomUUID(),
-      platform,
-      externalId: profile.externalId,
-      username: profile.username,
-      displayName: profile.displayName,
-      avatar: profile.avatar,
-      accessToken: '',
-      refreshToken: null,
-      expiresAt: null,
-      needsReconnect: false,
-      connectedAt: new Date().toISOString(),
-    };
-    Object.assign(account, { username: profile.username, displayName: profile.displayName, avatar: profile.avatar });
-    storeTokens(account, tokens);
-    if (!existing) data().accounts.push(account);
+    // Most platforms map one login to one account; Meta and Pinterest yield several (Pages, boards).
+    const connected = provider.accounts
+      ? await provider.accounts(tokens)
+      : [{ ...tokens, profile: await provider.profile(tokens.accessToken) }];
+    for (const { profile, ...t } of connected) {
+      const existing = data().accounts.find(a => a.platform === platform && a.externalId === profile.externalId);
+      const account: StoredAccount = existing ?? {
+        id: crypto.randomUUID(),
+        platform,
+        externalId: profile.externalId,
+        username: profile.username,
+        displayName: profile.displayName,
+        avatar: profile.avatar,
+        accessToken: '',
+        refreshToken: null,
+        expiresAt: null,
+        needsReconnect: false,
+        connectedAt: new Date().toISOString(),
+      };
+      Object.assign(account, { username: profile.username, displayName: profile.displayName, avatar: profile.avatar });
+      storeTokens(account, t);
+      if (!existing) data().accounts.push(account);
+    }
     save();
-    res.redirect(back({ connected: platform }));
+    res.redirect(back({ connected: platform, count: String(connected.length) }));
+    return;
+
   } catch (err) {
     console.error(`[auth:${platform}]`, err);
     res.redirect(back({ error: err instanceof Error ? err.message : 'Connection failed.' }));
@@ -120,6 +127,9 @@ app.get('/api/providers', (_req, res) => {
         configured: !!p?.configured(),
         envVars: p?.envVars ?? [],
         redirectUri: p ? redirectUri(id) : null,
+        mediaMimes: p?.mediaMimes ?? [],
+        maxMedia: p?.maxMedia ?? 0,
+        requiresMedia: !!p?.requiresMedia,
       };
     }),
   );
@@ -282,6 +292,21 @@ function parseSchedule(value: unknown): { error: string } | { at: string } {
   return { at: t.toISOString() };
 }
 
+/** Rejects combinations a platform can't publish (e.g. video to X, text-only to Instagram) before they're scheduled. */
+function mediaProblem(accountIds: string[], mediaIds: string[]): string | null {
+  const db = data();
+  const files = mediaIds.map(id => db.media.find(m => m.id === id)).filter((m): m is StoredMedia => !!m);
+  for (const acc of db.accounts.filter(a => accountIds.includes(a.id))) {
+    const p = providers[acc.platform];
+    if (!p) continue;
+    if (p.requiresMedia && files.length === 0) return `${p.name} posts need an image or video.`;
+    if (files.length > p.maxMedia) return `${p.name} allows at most ${p.maxMedia} attachment${p.maxMedia === 1 ? '' : 's'}.`;
+    const bad = files.find(f => !p.mediaMimes.includes(f.mime));
+    if (bad) return p.mediaMimes.length ? `${p.name} can't post ${bad.originalName} (${bad.mime}). Supported: ${p.mediaMimes.join(', ')}.` : `${p.name} is text-only for now.`;
+  }
+  return null;
+}
+
 const platformsOf = (accountIds: string[]) =>
   [...new Set(data().accounts.filter(a => accountIds.includes(a.id)).map(a => a.platform))];
 
@@ -301,6 +326,10 @@ app.post('/api/posts', async (req, res) => {
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
   const f = parsed.fields as PostFields;
   if (action !== 'draft' && f.accounts.length === 0) return res.status(400).json({ error: 'Select at least one connected account' });
+  if (action !== 'draft') {
+    const problem = mediaProblem(f.accounts, f.mediaIds);
+    if (problem) return res.status(400).json({ error: problem });
+  }
 
   let scheduledAt: string | null = null;
   if (action === 'schedule' || (action === 'submit' && body.scheduledAt)) {
@@ -379,6 +408,10 @@ app.patch('/api/posts/:id', async (req, res) => {
     next.status = 'scheduled';
   }
   if (next.status !== 'draft' && next.accounts.length === 0) return res.status(400).json({ error: 'Select at least one connected account' });
+  if (next.status !== 'draft') {
+    const problem = mediaProblem(next.accounts, next.mediaIds);
+    if (problem) return res.status(400).json({ error: problem });
+  }
 
   Object.assign(post, next);
   save();

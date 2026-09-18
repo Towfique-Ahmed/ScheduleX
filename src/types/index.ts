@@ -16,6 +16,9 @@ export interface ProviderInfo {
   configured: boolean;
   envVars: string[];
   redirectUri: string | null;
+  mediaMimes: string[];
+  maxMedia: number;
+  requiresMedia: boolean;
 }
 
 export type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'publishing' | 'published' | 'failed';

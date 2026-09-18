@@ -1140,3 +1140,4 @@ body {
 .signout:hover { color: var(--text-sidebar-active); }
 .approval-card { padding: 20px; margin-bottom: 16px; }
 .approval-meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
+.setup-notes { margin: 12px 0 0 20px; font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }

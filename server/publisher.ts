@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { decrypt, encrypt } from './crypto.ts';
 import { providers } from './providers/index.ts';
+import { config } from './config.ts';
 import { LocalMedia, ProviderError } from './providers/types.ts';
 import { data, mediaDir, save, StoredAccount, StoredPost, PublishResult } from './store.ts';
 
@@ -48,7 +49,13 @@ async function publishToAccount(accountId: string, post: StoredPost): Promise<Pu
     if (!provider.mediaMimes.includes(m.mime)) {
       return { accountId, status: 'failed', error: `${provider.name} can't post ${m.mime} files yet` };
     }
-    media.push({ path: path.join(mediaDir, m.filename), mime: m.mime, name: m.originalName });
+    media.push({
+      path: path.join(mediaDir, m.filename), mime: m.mime, name: m.originalName,
+      publicUrl: config.publicUrl ? `${config.publicUrl}/api/media/file/${m.filename}` : undefined,
+    });
+  }
+  if (provider.requiresMedia && media.length === 0) {
+    return { accountId, status: 'failed', error: `${provider.name} posts need an image or video` };
   }
   if (media.length > provider.maxMedia) {
     return { accountId, status: 'failed', error: `${provider.name} allows at most ${provider.maxMedia} attachments` };
