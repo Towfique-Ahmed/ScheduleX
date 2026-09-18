@@ -12,6 +12,7 @@ import Queue from './pages/Queue';
 import Library from './pages/Library';
 import Categories from './pages/Categories';
 import Team from './pages/Team';
+import Inbox from './pages/Inbox';
 import Approvals from './pages/Approvals';
 import SignIn from './pages/SignIn';
 import { AppProvider, useApp } from './context/AppContext';
@@ -39,6 +40,7 @@ function Shell() {
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/approvals" element={can.approve ? <Approvals /> : <Navigate to="/" replace />} />
+            <Route path="/inbox" element={can.approve ? <Inbox /> : <Navigate to="/" replace />} />
             <Route path="/team" element={can.manageMembers ? <Team /> : <Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

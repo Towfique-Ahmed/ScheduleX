@@ -30,7 +30,7 @@ export const tiktok: Provider = {
   // TikTok's PKCE challenge is the *hex* SHA-256 of the verifier (not base64url like other providers).
   authUrl: ({ state, verifier, redirectUri }) =>
     'https://www.tiktok.com/v2/auth/authorize/?' + new URLSearchParams({
-      client_key: key(), scope: 'user.info.basic,video.publish', response_type: 'code', redirect_uri: redirectUri, state,
+      client_key: key(), scope: 'user.info.basic,user.info.stats,video.publish', response_type: 'code', redirect_uri: redirectUri, state,
       code_challenge: crypto.createHash('sha256').update(verifier).digest('hex'), code_challenge_method: 'S256',
     }),
 
@@ -73,4 +73,13 @@ export const tiktok: Provider = {
     // TikTok processes the video asynchronously; the post appears in the account once it finishes.
     return { externalId: String(json.data.publish_id) };
   },
+};
+
+tiktok.metrics = async ({ accessToken }) => {
+  const res = await fetch(`${API}/user/info/?fields=follower_count,likes_count`, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const json = await readJson(res);
+  if (res.status === 401) throw new ProviderError('TikTok rejected the access token', true);
+  const u = json.data?.user;
+  if (!res.ok || !u) throw new ProviderError(`TikTok stats: ${json.error?.message ?? res.status}`);
+  return { followers: u.follower_count, engagements: u.likes_count };
 };

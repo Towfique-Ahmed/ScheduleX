@@ -92,3 +92,49 @@ export const x: Provider = {
     return { externalId: json.data.id, url: `https://x.com/${username.replace(/^@/, '')}/status/${json.data.id}` };
   },
 };
+
+const xGet = async (path: string, token: string, what: string) => {
+  const res = await fetch(`https://api.x.com/2${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  const json = await readJson(res);
+  if (res.status === 401) throw new ProviderError('X rejected the access token', true);
+  if (!res.ok) throw new ProviderError(`${what}: ${json.detail ?? json.title ?? res.status}`);
+  return json;
+};
+
+x.metrics = async ({ accessToken, externalId }) => {
+  const me = await xGet('/users/me?user.fields=public_metrics', accessToken, 'X profile');
+  const out: import('./types.ts').Metrics = { followers: me.data?.public_metrics?.followers_count };
+  try {
+    // Recent post totals. Reading timelines needs a paid X API tier, so failure here is not fatal.
+    const t = await xGet(`/users/${externalId}/tweets?max_results=20&tweet.fields=public_metrics`, accessToken, 'X posts');
+    let imp = 0, eng = 0;
+    for (const tw of t.data ?? []) {
+      const m = tw.public_metrics ?? {};
+      imp += m.impression_count ?? 0;
+      eng += (m.like_count ?? 0) + (m.reply_count ?? 0) + (m.retweet_count ?? 0) + (m.quote_count ?? 0);
+    }
+    out.impressions = imp;
+    out.engagements = eng;
+  } catch { /* followers only */ }
+  return out;
+};
+
+x.inbox = async ({ accessToken, externalId }) => {
+  const json = await xGet(`/users/${externalId}/mentions?max_results=25&tweet.fields=created_at,author_id&expansions=author_id&user.fields=username,name`, accessToken, 'X mentions');
+  const users = new Map<string, { username: string; name: string }>((json.includes?.users ?? []).map((u: any) => [u.id, u]));
+  return (json.data ?? []).map((t: any) => {
+    const u = users.get(t.author_id);
+    return { externalId: t.id, author: u ? `${u.name} (@${u.username})` : 'Unknown', text: t.text, at: t.created_at, url: u ? `https://x.com/${u.username}/status/${t.id}` : undefined };
+  });
+};
+
+x.reply = async ({ accessToken, itemExternalId, text }) => {
+  const res = await fetch('https://api.x.com/2/tweets', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, reply: { in_reply_to_tweet_id: itemExternalId } }),
+  });
+  const json = await readJson(res);
+  if (res.status === 401) throw new ProviderError('X rejected the access token', true);
+  if (!res.ok) throw new ProviderError(`X: ${json.detail ?? json.title ?? res.status}`);
+};

@@ -1,6 +1,7 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { useAuth } from './AuthContext';
 import { api, CreatePostInput, PostInput } from '../api';
-import { AnalyticsData, Category, MediaItem, Post, ProviderInfo, Slot, SocialAccount, User } from '../types';
+import { Category, MediaItem, Post, ProviderInfo, Slot, SocialAccount, User } from '../types';
 
 interface AppState {
   posts: Post[];
@@ -10,7 +11,7 @@ interface AppState {
   categories: Category[];
   slots: Slot[];
   members: User[];
-  analytics: AnalyticsData[];
+  inboxUnread: number;
   loading: boolean;
   error: string | null;
   createPost: (input: CreatePostInput) => Promise<Post>;
@@ -39,6 +40,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [members, setMembers] = useState<User[]>([]);
+  const [inboxUnread, setInboxUnread] = useState(0);
+  const { can } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,13 +51,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         api.posts(), api.accounts(), api.providers(), api.media(), api.categories(), api.slots(), api.members(),
       ]);
       setPosts(p); setAccounts(a); setProviders(pr); setMedia(m); setCategories(c); setSlots(s); setMembers(mem);
+      if (can.approve) api.inbox().then(r => setInboxUnread(r.items.filter(i => !i.read).length)).catch(() => undefined);
       setError(null);
     } catch {
       setError('Cannot reach the ScheduleX server. Start it with `npm run dev`.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [can.approve]);
 
   useEffect(() => {
     void refresh();
@@ -121,19 +125,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSlots(await api.saveSlots(next));
   }, []);
 
-  // Not backed by real data yet: derived from connected accounts with placeholder numbers.
-  const analytics = useMemo<AnalyticsData[]>(
-    () =>
-      [...new Set(accounts.map(a => a.platform))].map(platform => ({
-        platform, followers: 0, engagement: 0, impressions: 0, clicks: 0, trend: 0,
-      })),
-    [accounts],
-  );
-
   return (
     <AppContext.Provider
       value={{
-        posts, accounts, providers, media, categories, slots, members, analytics, loading, error,
+        posts, accounts, providers, media, categories, slots, members, inboxUnread, loading, error,
         createPost, updatePost, retryPost, approvePost, rejectPost, withdrawPost, deletePost, disconnectAccount,
         uploadMedia, deleteMedia, createCategory, deleteCategory, saveSlots, refresh,
       }}

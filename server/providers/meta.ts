@@ -182,3 +182,68 @@ export const instagram: Provider = {
     return { externalId: String(published.id), url };
   },
 };
+
+// ---- Analytics & inbox ---------------------------------------------------------------
+const gget = (path: string, token: string, what: string) =>
+  graphJson(graph(`${path}${path.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}`), undefined, what);
+
+/** Sums an Insights response's values; returns undefined if the metric isn't there. */
+const insightTotal = (json: any, metric: string): number | undefined => {
+  const row = (json.data ?? []).find((d: any) => d.name === metric);
+  if (!row) return undefined;
+  if (row.total_value) return row.total_value.value;
+  return (row.values ?? []).reduce((n: number, v: any) => n + (typeof v.value === 'number' ? v.value : 0), 0);
+};
+
+facebook.metrics = async ({ accessToken, externalId }) => {
+  const page = await gget(`/${externalId}?fields=followers_count,fan_count`, accessToken, 'Facebook Page');
+  const out: import('./types.ts').Metrics = { followers: page.followers_count ?? page.fan_count };
+  try {
+    // Insights metric names change between Graph versions; failure just means followers-only.
+    const ins = await gget(`/${externalId}/insights?metric=page_media_view,page_post_engagements&period=days_28`, accessToken, 'Facebook insights');
+    out.impressions = insightTotal(ins, 'page_media_view');
+    out.engagements = insightTotal(ins, 'page_post_engagements');
+  } catch { /* followers only */ }
+  return out;
+};
+
+instagram.metrics = async ({ accessToken, externalId }) => {
+  const acct = await gget(`/${externalId}?fields=followers_count`, accessToken, 'Instagram account');
+  const out: import('./types.ts').Metrics = { followers: acct.followers_count };
+  try {
+    const ins = await gget(`/${externalId}/insights?metric=views,accounts_engaged&metric_type=total_value&period=day`, accessToken, 'Instagram insights');
+    out.impressions = insightTotal(ins, 'views');
+    out.engagements = insightTotal(ins, 'accounts_engaged');
+  } catch { /* followers only */ }
+  return out;
+};
+
+facebook.inbox = async ({ accessToken, externalId }) => {
+  const json = await gget(`/${externalId}/feed?fields=message,comments.limit(25){id,message,from,created_time,permalink_url}&limit=10`, accessToken, 'Facebook comments');
+  const out: import('./types.ts').InboxEntry[] = [];
+  for (const post of json.data ?? []) {
+    for (const c of post.comments?.data ?? []) {
+      if (c.from?.id === externalId) continue; // the Page's own replies
+      out.push({ externalId: c.id, author: c.from?.name ?? 'Facebook user', text: c.message ?? '', at: c.created_time, url: c.permalink_url, context: post.message?.slice(0, 80) });
+    }
+  }
+  return out;
+};
+
+instagram.inbox = async ({ accessToken, externalId }) => {
+  const json = await gget(`/${externalId}/media?fields=caption,permalink,comments.limit(25){id,text,username,timestamp}&limit=10`, accessToken, 'Instagram comments');
+  const out: import('./types.ts').InboxEntry[] = [];
+  for (const media of json.data ?? []) {
+    for (const c of media.comments?.data ?? []) {
+      out.push({ externalId: c.id, author: '@' + (c.username ?? 'user'), text: c.text ?? '', at: c.timestamp, url: media.permalink, context: media.caption?.slice(0, 80) });
+    }
+  }
+  return out;
+};
+
+facebook.reply = async ({ accessToken, itemExternalId, text }) => {
+  await post(`/${itemExternalId}/comments`, { message: text, access_token: accessToken }, 'Facebook reply');
+};
+instagram.reply = async ({ accessToken, itemExternalId, text }) => {
+  await post(`/${itemExternalId}/replies`, { message: text, access_token: accessToken }, 'Instagram reply');
+};

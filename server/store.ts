@@ -16,6 +16,9 @@ export interface StoredAccount {
   expiresAt: string | null;
   needsReconnect: boolean;
   connectedAt: string;
+  metricsError?: string | null;
+  metricsAt?: string | null;
+  inboxError?: string | null;
 }
 
 export type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'publishing' | 'published' | 'failed';
@@ -62,6 +65,29 @@ export interface PublishResult {
   externalId?: string;
   url?: string;
   error?: string;
+}
+
+export interface Snapshot {
+  accountId: string;
+  /** yyyy-mm-dd (UTC). One snapshot per account per day. */
+  day: string;
+  followers?: number;
+  impressions?: number;
+  engagements?: number;
+  clicks?: number;
+}
+
+export interface InboxItem {
+  id: string;
+  accountId: string;
+  externalId: string;
+  author: string;
+  text: string;
+  at: string;
+  url?: string;
+  context?: string;
+  read: boolean;
+  reply: { text: string; by: string; at: string } | null;
 }
 
 export interface StoredMedia {
@@ -115,10 +141,12 @@ interface Db {
   users: User[];
   sessions: Session[];
   invites: Invite[];
+  snapshots: Snapshot[];
+  inbox: InboxItem[];
 }
 
 const file = path.join(config.dataDir, 'db.json');
-let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [], users: [], sessions: [], invites: [] };
+let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [], users: [], sessions: [], invites: [], snapshots: [], inbox: [] };
 
 if (fs.existsSync(file)) db = { ...db, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
 for (const p of db.posts) {

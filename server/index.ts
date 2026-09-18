@@ -1,7 +1,10 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { audience, collectAllMetrics, publishingStats, reportCsv } from './analytics.ts';
+import { fetchAllInboxes, sendReply } from './inbox.ts';
 import { authRouter, originCheck, requireRole, requireUser, sessionMiddleware, teamRouter, userFrom } from './auth.ts';
 import { config, redirectUri } from './config.ts';
 import { can } from './roles.ts';
@@ -243,6 +246,59 @@ app.put('/api/slots', requireRole(can.manageSlots), (req, res) => {
   data().slots = clean;
   save();
   res.json(clean);
+});
+
+// ---- Analytics, reports, inbox ------------------------------------------------------------
+const rangeDays = (v: unknown) => [7, 30, 90].includes(Number(v)) ? Number(v) : 30;
+
+app.get('/api/analytics', (req, res) => {
+  const days = rangeDays(req.query.days);
+  res.json({ days, publishing: publishingStats(days), audience: audience(days) });
+});
+
+app.post('/api/analytics/refresh', requireRole(can.approve), async (req, res) => {
+  await collectAllMetrics();
+  const days = rangeDays(req.query.days);
+  res.json({ days, publishing: publishingStats(days), audience: audience(days) });
+});
+
+app.get('/api/reports/summary.csv', requireRole(can.approve), (req, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="scheduleX-report-${new Date().toISOString().slice(0, 10)}.csv"`);
+  res.send(reportCsv(rangeDays(req.query.days)));
+});
+
+app.get('/api/inbox', requireRole(can.approve), (_req, res) => {
+  const db = data();
+  res.json({
+    items: db.inbox,
+    accounts: db.accounts
+      .filter(a => providers[a.platform]?.inbox)
+      .map(a => ({ id: a.id, platform: a.platform, displayName: a.displayName, error: a.inboxError ?? null })),
+  });
+});
+
+app.post('/api/inbox/refresh', requireRole(can.approve), async (_req, res) => {
+  await fetchAllInboxes();
+  res.json({ ok: true });
+});
+
+app.post('/api/inbox/:id/read', requireRole(can.approve), (req, res) => {
+  const item = data().inbox.find(i => i.id === req.params.id);
+  if (!item) return res.status(404).json({ error: 'Not found' });
+  item.read = req.body?.read !== false;
+  save();
+  res.json(item);
+});
+
+app.post('/api/inbox/:id/reply', requireRole(can.approve), async (req, res) => {
+  const text = String(req.body?.text ?? '').trim();
+  if (!text || text.length > 2000) return res.status(400).json({ error: 'Write a reply (up to 2000 characters)' });
+  try {
+    res.json(await sendReply(String(req.params.id), text, userFrom(res).id));
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : 'Reply failed' });
+  }
 });
 
 // ---- Posts ------------------------------------------------------------------
@@ -492,6 +548,13 @@ app.delete('/api/posts/:id', (req, res) => {
   save();
   res.status(204).end();
 });
+
+// Serve the built web app (`npm run build`) so one process runs everything in production.
+const dist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../dist');
+if (fs.existsSync(path.join(dist, 'index.html'))) {
+  app.use(express.static(dist, { index: false, maxAge: '1h' }));
+  app.get(/^\/(?!api\/|assets\/).*/, (_req, res) => res.sendFile(path.join(dist, 'index.html')));
+}
 
 // Loopback by default; set HOST=0.0.0.0 only behind HTTPS (and set APP_URL to your https address).
 app.listen(config.port, config.host, () => {

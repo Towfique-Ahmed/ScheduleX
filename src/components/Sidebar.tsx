@@ -6,7 +6,7 @@ import { ROLE_LABELS } from '../utils/roles';
 
 export default function Sidebar() {
   const { user, can, logout } = useAuth();
-  const { posts } = useApp();
+  const { posts, inboxUnread } = useApp();
   const pending = posts.filter(p => p.status === 'pending_approval').length;
 
   const navItems = [
@@ -14,6 +14,7 @@ export default function Sidebar() {
     ...(can.draft ? [{ path: '/compose', label: 'Create Post', icon: '✏️' }] : []),
     { path: '/posts', label: 'Posts', icon: '📝' },
     ...(can.approve ? [{ path: '/approvals', label: 'Approvals', icon: '✅', badge: pending }] : []),
+    ...(can.approve ? [{ path: '/inbox', label: 'Inbox', icon: '💬', badge: inboxUnread }] : []),
     { path: '/calendar', label: 'Calendar', icon: '📅' },
     { path: '/queue', label: 'Queue', icon: '🗓️' },
     { path: '/library', label: 'Media Library', icon: '🖼️' },

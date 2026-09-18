@@ -1,5 +1,7 @@
 import { publishPost } from './publisher.ts';
 import crypto from 'node:crypto';
+import { collectAllMetrics } from './analytics.ts';
+import { fetchAllInboxes } from './inbox.ts';
 import { data, save } from './store.ts';
 
 let running = false;
@@ -47,4 +49,10 @@ async function tick() {
 export function startScheduler(intervalMs = 15_000) {
   setInterval(tick, intervalMs);
   void tick();
+  // Slow background jobs. Failures are recorded on the account, never thrown.
+  const safe = (fn: () => Promise<void>) => () => { fn().catch(err => console.error('[scheduler]', err)); };
+  setInterval(safe(collectAllMetrics), 6 * 60 * 60_000);
+  setInterval(safe(fetchAllInboxes), 10 * 60_000);
+  setTimeout(safe(collectAllMetrics), 30_000);
+  setTimeout(safe(fetchAllInboxes), 45_000);
 }

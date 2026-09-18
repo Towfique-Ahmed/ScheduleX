@@ -82,3 +82,18 @@ export const pinterest: Provider = {
     return { externalId: String(json.id), url: `https://www.pinterest.com/pin/${json.id}/` };
   },
 };
+
+pinterest.metrics = async ({ accessToken }) => {
+  const user = await get('/user_account', accessToken, 'Pinterest profile');
+  const out: import('./types.ts').Metrics = { followers: user.follower_count };
+  try {
+    const end = new Date(), start = new Date(Date.now() - 28 * 86400_000);
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const a = await get(`/user_account/analytics?start_date=${day(start)}&end_date=${day(end)}&metric_types=IMPRESSION,ENGAGEMENT,PIN_CLICK`, accessToken, 'Pinterest analytics');
+    const s = a.all?.summary_metrics ?? {};
+    out.impressions = s.IMPRESSION;
+    out.engagements = s.ENGAGEMENT;
+    out.clicks = s.PIN_CLICK;
+  } catch { /* followers only */ }
+  return out;
+};

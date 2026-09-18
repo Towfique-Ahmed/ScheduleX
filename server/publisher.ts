@@ -15,7 +15,7 @@ export function storeTokens(account: StoredAccount, t: { accessToken: string; re
 }
 
 /** Returns a usable access token, refreshing it first if it is about to expire. */
-async function validToken(account: StoredAccount): Promise<string> {
+export async function accessTokenFor(account: StoredAccount): Promise<string> {
   const provider = providers[account.platform]!;
   const expiring = account.expiresAt && new Date(account.expiresAt).getTime() - Date.now() < REFRESH_MARGIN_MS;
   if (expiring) {
@@ -62,7 +62,7 @@ async function publishToAccount(accountId: string, post: StoredPost): Promise<Pu
   }
 
   try {
-    const accessToken = await validToken(account);
+    const accessToken = await accessTokenFor(account);
     const out = await provider.publish({ accessToken, externalId: account.externalId, username: account.username, content: post.content, media });
     return { accountId, status: 'published', externalId: out.externalId, url: out.url };
   } catch (err) {

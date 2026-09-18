@@ -1,10 +1,14 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { api } from '../api';
+import { AudienceRow } from '../types';
 import { useApp } from '../context/AppContext';
 import { platformConfig, formatNumber } from '../utils/platforms';
 import { useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const { posts, analytics, accounts } = useApp();
+  const { posts, accounts } = useApp();
+  const [audience, setAudience] = useState<AudienceRow[]>([]);
+  useEffect(() => { api.analytics(30).then(r => setAudience(r.audience)).catch(() => undefined); }, []);
   const navigate = useNavigate();
 
   const scheduled = posts.filter(p => p.status === 'scheduled');
@@ -53,24 +57,24 @@ export default function Dashboard() {
       <div className="dashboard-grid">
         <div className="card">
           <div className="card-header">
-            <h2>Platform Performance</h2>
+            <h2>Audience</h2>
           </div>
           <div className="analytics-list">
-            {analytics.map(a => (
-              <div key={a.platform} className="analytics-row">
-                <div className="platform-badge" style={{ background: platformConfig[a.platform].color }}>
-                  {platformConfig[a.platform].icon}
-                </div>
+            {audience.length === 0 && <div className="empty-state"><p>Connect an account to see audience numbers.</p></div>}
+            {audience.map(a => (
+              <div key={a.accountId} className="analytics-row">
+                <div className="platform-badge" style={{ background: platformConfig[a.platform].color }}>{platformConfig[a.platform].icon}</div>
                 <div className="analytics-info">
-                  <span className="analytics-name">{platformConfig[a.platform].name}</span>
-                  <span className="analytics-followers">{formatNumber(a.followers)} followers</span>
-                </div>
-                <div className="analytics-engagement">
-                  <span className="engagement-value">{a.engagement}%</span>
-                  <span className={`trend ${a.trend >= 0 ? 'up' : 'down'}`}>
-                    {a.trend >= 0 ? '↑' : '↓'} {Math.abs(a.trend)}%
+                  <span className="analytics-name">{a.displayName}</span>
+                  <span className="analytics-followers">
+                    {!a.supported ? 'Analytics not available for this platform' : a.latest?.followers !== undefined ? `${formatNumber(a.latest.followers)} followers` : 'No data yet'}
                   </span>
                 </div>
+                {a.followerChange !== null && (
+                  <div className="analytics-engagement">
+                    <span className={`trend ${a.followerChange >= 0 ? 'up' : 'down'}`}>{a.followerChange >= 0 ? '↑' : '↓'} {Math.abs(a.followerChange)} in 30d</span>
+                  </div>
+                )}
               </div>
             ))}
           </div>

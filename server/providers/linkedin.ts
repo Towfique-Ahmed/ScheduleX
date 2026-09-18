@@ -111,3 +111,5 @@ export const linkedin: Provider = {
     return { externalId: urn, url: urn ? `https://www.linkedin.com/feed/update/${urn}` : undefined };
   },
 };
+
+linkedin.metricsNote = 'LinkedIn does not offer follower or post analytics for personal profiles to ordinary apps (it requires Marketing Developer Platform partner access).';

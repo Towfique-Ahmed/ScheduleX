@@ -73,13 +73,53 @@ export interface Post {
   accounts: string[];
 }
 
-export interface AnalyticsData {
+export interface AudienceRow {
+  accountId: string;
   platform: Platform;
-  followers: number;
-  engagement: number;
-  impressions: number;
-  clicks: number;
-  trend: number;
+  displayName: string;
+  username: string;
+  supported: boolean;
+  note: string | null;
+  error: string | null;
+  updatedAt: string | null;
+  latest: { followers?: number; impressions?: number; engagements?: number; clicks?: number } | null;
+  followerChange: number | null;
+  series: { day: string; followers: number | null }[];
+}
+
+export interface AnalyticsReport {
+  days: number;
+  publishing: {
+    published: number;
+    failed: number;
+    successRate: number | null;
+    scheduled: number;
+    drafts: number;
+    pending: number;
+    byDay: { date: string; published: number; failed: number }[];
+    byPlatform: { platform: Platform; published: number; failed: number }[];
+    byCategory: { categoryId: string; name: string; published: number }[];
+  };
+  audience: AudienceRow[];
+}
+
+export interface InboxItem {
+  id: string;
+  accountId: string;
+  author: string;
+  text: string;
+  at: string;
+  url?: string;
+  context?: string;
+  read: boolean;
+  reply: { text: string; by: string; at: string } | null;
+}
+
+export interface InboxAccount {
+  id: string;
+  platform: Platform;
+  displayName: string;
+  error: string | null;
 }
 
 export interface MediaItem {

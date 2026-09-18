@@ -1141,3 +1141,30 @@ body {
 .approval-card { padding: 20px; margin-bottom: 16px; }
 .approval-meta { font-size: 13px; color: var(--text-secondary); margin-bottom: 8px; }
 .setup-notes { margin: 12px 0 0 20px; font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 6px; }
+
+/* Charts, tables, inbox, print */
+.chart { width: 100%; height: auto; display: block; }
+.chart-grid { stroke: var(--border); stroke-width: 1; }
+.chart-axis { font-size: 11px; fill: var(--text-secondary); }
+.bar-ok { fill: var(--primary); }
+.bar-fail { fill: var(--danger); }
+.key { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 12px; }
+.key-ok { background: var(--primary); }
+.key-fail { background: var(--danger); }
+.spark { width: 120px; height: 32px; }
+.spark-line { fill: none; stroke: var(--primary); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.data-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.data-table th { text-align: left; font-weight: 500; color: var(--text-secondary); font-size: 12px; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+.data-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.data-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.inbox-item { padding: 16px 20px; margin-bottom: 12px; }
+.inbox-item.unread { border-left: 3px solid var(--primary); }
+.inbox-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.inbox-reply { font-size: 13px; color: #166534; background: #f0fdf4; padding: 6px 10px; border-radius: var(--radius-sm); margin: 8px 0; }
+@media print {
+  .sidebar, .header, .no-print, .server-banner { display: none !important; }
+  .main-content { margin: 0 !important; }
+  .card { box-shadow: none; break-inside: avoid; }
+}
+
+a.btn { text-decoration: none; display: inline-block; }

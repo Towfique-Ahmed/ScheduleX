@@ -13,6 +13,29 @@ export interface Profile {
   avatar: string;
 }
 
+export interface Metrics {
+  followers?: number;
+  impressions?: number;
+  engagements?: number;
+  clicks?: number;
+}
+
+export interface InboxEntry {
+  externalId: string;
+  author: string;
+  text: string;
+  at: string;
+  url?: string;
+  /** Snippet of the post being commented on. */
+  context?: string;
+}
+
+interface Auth {
+  accessToken: string;
+  externalId: string;
+  username: string;
+}
+
 /** One connectable account. A single login can yield several (Facebook Pages, Pinterest boards). */
 export interface ConnectedAccount extends Tokens {
   profile: Profile;
@@ -34,6 +57,13 @@ export interface Provider {
   /** MIME types this provider can attach. Empty means text-only. */
   mediaMimes: string[];
   maxMedia: number;
+  /** Audience/performance numbers. Absent when the platform's API doesn't offer them to ordinary apps. */
+  metrics?(auth: Auth): Promise<Metrics>;
+  /** Why metrics are unavailable, shown in the UI. */
+  metricsNote?: string;
+  /** Recent comments/mentions on this account. */
+  inbox?(auth: Auth): Promise<InboxEntry[]>;
+  reply?(auth: Auth & { itemExternalId: string; text: string }): Promise<void>;
   /** True when a post cannot be text-only (Instagram, TikTok, Pinterest). */
   requiresMedia?: boolean;
   publish(params: {

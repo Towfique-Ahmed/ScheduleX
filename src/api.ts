@@ -1,4 +1,4 @@
-import { Category, Invite, MediaItem, Post, ProviderInfo, Role, Slot, SocialAccount, User } from './types';
+import { AnalyticsReport, Category, InboxAccount, InboxItem, Invite, MediaItem, Post, ProviderInfo, Role, Slot, SocialAccount, User } from './types';
 
 /** Called when any request comes back 401 so the app can drop back to the sign-in screen. */
 let onUnauthorized: (() => void) | null = null;
@@ -47,6 +47,13 @@ export const api = {
   invites: () => request<Invite[]>('/api/invites'),
   createInvite: (role: Role) => request<Invite & { url: string }>('/api/invites', json('POST', { role })),
   deleteInvite: (id: string) => request<void>(`/api/invites/${id}`, { method: 'DELETE' }),
+
+  analytics: (days: number) => request<AnalyticsReport>(`/api/analytics?days=${days}`),
+  refreshAnalytics: (days: number) => request<AnalyticsReport>(`/api/analytics/refresh?days=${days}`, { method: 'POST' }),
+  inbox: () => request<{ items: InboxItem[]; accounts: InboxAccount[] }>('/api/inbox'),
+  refreshInbox: () => request<{ ok: true }>('/api/inbox/refresh', { method: 'POST' }),
+  markRead: (id: string, read: boolean) => request<InboxItem>(`/api/inbox/${id}/read`, json('POST', { read })),
+  replyTo: (id: string, text: string) => request<InboxItem>(`/api/inbox/${id}/reply`, json('POST', { text })),
 
   approvePost: (id: string, scheduledAt?: string) => request<Post>(`/api/posts/${id}/approve`, json('POST', { scheduledAt })),
   rejectPost: (id: string, note: string) => request<Post>(`/api/posts/${id}/reject`, json('POST', { note })),
