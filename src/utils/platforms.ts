@@ -76,3 +76,13 @@ export const SCOPE_TEXT: Record<string, string> = {
   rw_ads: 'Manage your advertising accounts',
   r_ads_reporting: 'Read advertising reports',
 };
+
+/** Where to register the app for each platform. */
+export const DEV_PORTALS: Record<Platform, { url: string; label: string }> = {
+  twitter: { url: 'https://developer.x.com/en/portal/dashboard', label: 'X Developer Portal' },
+  linkedin: { url: 'https://www.linkedin.com/developers/apps/new', label: 'LinkedIn Developers' },
+  facebook: { url: 'https://developers.facebook.com/apps/creation/', label: 'Meta for Developers' },
+  instagram: { url: 'https://developers.facebook.com/apps/creation/', label: 'Meta for Developers' },
+  tiktok: { url: 'https://developers.tiktok.com/apps/', label: 'TikTok for Developers' },
+  pinterest: { url: 'https://developers.pinterest.com/apps/', label: 'Pinterest Developers' },
+};

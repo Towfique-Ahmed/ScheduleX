@@ -1,9 +1,10 @@
+import { cred } from '../credentials.ts';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { isDeadGrant, Provider, ProviderError, readJson } from './types.ts';
 
-const key = () => process.env.TIKTOK_CLIENT_KEY ?? '';
-const secret = () => process.env.TIKTOK_CLIENT_SECRET ?? '';
+const key = () => cred('TIKTOK_CLIENT_KEY');
+const secret = () => cred('TIKTOK_CLIENT_SECRET');
 const API = 'https://open.tiktokapis.com/v2';
 
 async function tokenRequest(body: Record<string, string>) {

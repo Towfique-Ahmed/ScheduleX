@@ -1,8 +1,9 @@
+import { cred } from '../credentials.ts';
 import fs from 'node:fs';
 import { ConnectedAccount, isDeadGrant, Provider, ProviderError, readJson } from './types.ts';
 
-const id = () => process.env.PINTEREST_APP_ID ?? '';
-const secret = () => process.env.PINTEREST_APP_SECRET ?? '';
+const id = () => cred('PINTEREST_APP_ID');
+const secret = () => cred('PINTEREST_APP_SECRET');
 // Apps with "trial" access must use the sandbox host until Pinterest upgrades them.
 const api = () => (process.env.PINTEREST_API_BASE ?? 'https://api.pinterest.com/v5').replace(/\/$/, '');
 

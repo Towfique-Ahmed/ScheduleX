@@ -145,10 +145,12 @@ interface Db {
   invites: Invite[];
   snapshots: Snapshot[];
   inbox: InboxItem[];
+  /** App credentials entered in the UI, keyed by env var name, each encrypted. */
+  credentials: Record<string, string>;
 }
 
 const file = path.join(config.dataDir, 'db.json');
-let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [], users: [], sessions: [], invites: [], snapshots: [], inbox: [] };
+let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [], users: [], sessions: [], invites: [], snapshots: [], inbox: [], credentials: {} };
 
 if (fs.existsSync(file)) db = { ...db, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
 for (const p of db.posts) {

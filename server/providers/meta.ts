@@ -1,3 +1,4 @@
+import { cred } from '../credentials.ts';
 import fs from 'node:fs';
 import { config } from '../config.ts';
 import { ConnectedAccount, LocalMedia, Provider, ProviderError, readJson } from './types.ts';
@@ -5,8 +6,8 @@ import { ConnectedAccount, LocalMedia, Provider, ProviderError, readJson } from 
 // Facebook Pages and Instagram professional accounts share one Meta app and one login.
 // Both are reached with a *Page* access token, which never expires when derived from a long-lived user token.
 
-const appId = () => process.env.META_APP_ID ?? '';
-const appSecret = () => process.env.META_APP_SECRET ?? '';
+const appId = () => cred('META_APP_ID');
+const appSecret = () => cred('META_APP_SECRET');
 const graph = (path: string) => `https://graph.facebook.com/${config.graphVersion}${path}`;
 
 /** Graph errors: code 190 means the token is invalid/expired, so the user must reconnect. */

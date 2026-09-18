@@ -1,9 +1,10 @@
+import { cred } from '../credentials.ts';
 import { config } from '../config.ts';
 import fs from 'node:fs';
 import { ConnectedAccount, LocalMedia, Provider, ProviderError, readJson } from './types.ts';
 
-const clientId = () => process.env.LINKEDIN_CLIENT_ID ?? '';
-const clientSecret = () => process.env.LINKEDIN_CLIENT_SECRET ?? '';
+const clientId = () => cred('LINKEDIN_CLIENT_ID');
+const clientSecret = () => cred('LINKEDIN_CLIENT_SECRET');
 
 const restHeaders = (accessToken: string) => ({
   Authorization: `Bearer ${accessToken}`,

@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { CONNECT_CHANNEL, ConnectMessage, connectInThisTab, openConnectWindow } from '../utils/connect';
-import { platformConfig, SCOPE_TEXT, SETUP_NOTES } from '../utils/platforms';
+import { DEV_PORTALS, platformConfig, SCOPE_TEXT, SETUP_NOTES } from '../utils/platforms';
+import { useAuth } from '../context/AuthContext';
 import { Platform, ProviderInfo, SelectableAccount } from '../types';
 
 type Step =
@@ -10,7 +11,7 @@ type Step =
   | { kind: 'variant'; provider: ProviderInfo }
   | { kind: 'waiting'; platform: Platform }
   | { kind: 'select'; id: string; platform: Platform; accounts: SelectableAccount[]; chosen: string[] }
-  | { kind: 'setup'; provider: ProviderInfo };
+  | { kind: 'setup'; provider: ProviderInfo; reconfigure?: boolean };
 
 export interface ConnectResult { kind: 'success' | 'error'; text: string }
 
@@ -28,6 +29,9 @@ const successText = (platform: Platform, count = 1) =>
 
 export default function ConnectDialog({ onClose, onResult, resume, selectId }: Props) {
   const { providers, refresh } = useApp();
+  const { can } = useAuth();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [copied, setCopied] = useState(false);
   const [step, setStep] = useState<Step>(resume ? { kind: 'waiting', platform: resume.platform } : { kind: 'grid' });
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -90,10 +94,40 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
     setStep({ kind: 'waiting', platform });
   };
 
-  const pick = (p: ProviderInfo) => {
-    if (!p.configured) setStep({ kind: 'setup', provider: p });
-    else if (p.variants.length > 1) setStep({ kind: 'variant', provider: p });
+  /** Where to go once a platform is usable: pick Profile/Page, or straight to its sign-in. */
+  const proceed = (p: ProviderInfo) => {
+    if (p.variants.length > 1) setStep({ kind: 'variant', provider: p });
     else start(p.platform);
+  };
+
+  const saveAndContinue = async () => {
+    if (step.kind !== 'setup') return;
+    setBusy(true); setMessage(null);
+    try {
+      const updated = await api.saveCredentials(step.provider.platform, values);
+      await refresh();
+      setValues({});
+      if (!updated.configured) {
+        const missing = updated.credentials.filter(c => c.required && !c.set).map(c => c.label).join(' and ');
+        setMessage(`Still needed: ${missing}.`);
+        setStep({ kind: 'setup', provider: updated, reconfigure: step.reconfigure });
+      } else proceed(updated);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : 'Could not save.');
+    }
+    setBusy(false);
+  };
+
+  const removeCredentials = async () => {
+    if (step.kind !== 'setup' || !confirm(`Remove the saved ${platformConfig[step.provider.platform].name} app credentials? Already-connected accounts may stop refreshing until they're set again.`)) return;
+    try { const updated = await api.clearCredentials(step.provider.platform); await refresh(); setStep({ kind: 'setup', provider: updated }); setMessage(null); }
+    catch (e) { setMessage(e instanceof Error ? e.message : 'Could not remove.'); }
+  };
+
+  const pick = (p: ProviderInfo) => {
+    setValues({}); setMessage(null);
+    if (!p.configured) setStep({ kind: 'setup', provider: p });
+    else proceed(p);
   };
 
   const cancel = async () => {
@@ -102,7 +136,7 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
     onClose();
   };
 
-  const confirm = async () => {
+  const confirmChosen = async () => {
     if (step.kind !== 'select') return;
     setBusy(true);
     try {
@@ -120,7 +154,7 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
     : step.kind === 'variant' ? platformConfig[step.provider.platform].name
     : step.kind === 'waiting' ? `Connecting ${platformConfig[step.platform].name}`
     : step.kind === 'select' ? `Choose ${platformConfig[step.platform].name} accounts`
-    : `Set up ${platformConfig[step.provider.platform].name}`;
+    : `Connect ${platformConfig[step.provider.platform].name}`;
 
   return (
     <div className="modal-backdrop" onClick={() => void cancel()}>
@@ -138,11 +172,17 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
               {providers.map(p => {
                 const c = platformConfig[p.platform];
                 return (
-                  <button key={p.platform} className="connect-tile" onClick={() => pick(p)}>
-                    <span className="connect-tile-icon" style={{ background: c.color }}>{c.icon}</span>
-                    <span className="connect-tile-name">{c.name}</span>
-                    {!p.configured && <span className="connect-tile-flag">Needs setup</span>}
-                  </button>
+                  <div key={p.platform} className="connect-tile-wrap">
+                    <button className="connect-tile" onClick={() => pick(p)}>
+                      <span className="connect-tile-icon" style={{ background: c.color }}>{c.icon}</span>
+                      <span className="connect-tile-name">{c.name}</span>
+                      {!p.configured && <span className="connect-tile-flag">One-time setup</span>}
+                    </button>
+                    {p.configured && can.manageAccounts && (
+                      <button className="tile-gear" aria-label={`${c.name} app settings`} title="App settings"
+                        onClick={() => { setValues({}); setMessage(null); setStep({ kind: 'setup', provider: p, reconfigure: true }); }}>⚙</button>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -209,28 +249,66 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
             </ul>
             <div className="modal-actions">
               <button className="btn btn-outline btn-sm" onClick={() => void cancel()}>Cancel</button>
-              <button className="btn btn-primary btn-sm" disabled={busy || step.chosen.length === 0} onClick={() => void confirm()}>
+              <button className="btn btn-primary btn-sm" disabled={busy || step.chosen.length === 0} onClick={() => void confirmChosen()}>
                 {busy ? 'Connecting…' : `Connect ${step.chosen.length} account${step.chosen.length === 1 ? '' : 's'}`}
               </button>
             </div>
           </>
         )}
 
-        {step.kind === 'setup' && (
-          <>
-            <p>{platformConfig[step.provider.platform].name} isn't set up on this server yet. This is a one-time step for whoever runs ScheduleX; after that, everyone just clicks and signs in.</p>
-            <ol className="setup-steps">
-              <li>Register a developer app on the {platformConfig[step.provider.platform].name} developer portal.</li>
-              <li>Add this redirect / callback URL to the app:<code className="setup-code">{step.provider.redirectUri}</code></li>
-              <li>Put the app's credentials in <code>.env</code>:<code className="setup-code">{step.provider.envVars.map(v => `${v}=...`).join('\n')}</code></li>
-              <li>Restart the server, then connect again.</li>
-            </ol>
-            {(SETUP_NOTES[step.provider.platform] ?? []).length > 0 && (
-              <ul className="setup-notes">{SETUP_NOTES[step.provider.platform]!.map(n => <li key={n}>{n}</li>)}</ul>
-            )}
-            <div className="modal-actions"><button className="btn btn-outline btn-sm" onClick={() => setStep({ kind: 'grid' })}>← Back</button></div>
-          </>
-        )}
+        {step.kind === 'setup' && (() => {
+          const pf = step.provider, name = platformConfig[pf.platform].name, portal = DEV_PORTALS[pf.platform];
+          const fields = pf.credentials;
+          const ready = fields.filter(f => f.required).every(f => values[f.name]?.trim() || f.set);
+          return (
+            <>
+              <p style={{ marginTop: 0 }}>
+                {step.reconfigure
+                  ? `These are the ${name} app credentials ScheduleX signs people in with.`
+                  : `${name} only lets registered apps sign people in. Register ScheduleX with ${name} once (about 2 minutes); after that, connecting is one click for everyone.`}
+              </p>
+              <ol className="wizard">
+                <li>
+                  <strong>Create an app</strong> on {portal.label}.
+                  <div><a className="btn btn-outline btn-sm" href={portal.url} target="_blank" rel="noreferrer">Open {portal.label} ↗</a></div>
+                </li>
+                <li>
+                  <strong>Add this redirect URL</strong> to the app:
+                  <div className="copy-row">
+                    <code className="setup-code">{pf.redirectUri}</code>
+                    <button className="btn btn-outline btn-sm" onClick={() => { void navigator.clipboard.writeText(pf.redirectUri ?? '').then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}>{copied ? 'Copied' : 'Copy'}</button>
+                  </div>
+                </li>
+                <li>
+                  <strong>Paste the app's credentials</strong>:
+                  <div className="cred-fields">
+                    {fields.map(f => (
+                      <label key={f.name} className="field">
+                        <span>{f.label}{f.required ? '' : ' (optional)'}</span>
+                        <input type={f.secret ? 'password' : 'text'} autoComplete="off" spellCheck={false}
+                          value={values[f.name] ?? ''} onChange={e => setValues({ ...values, [f.name]: e.target.value })}
+                          disabled={f.source === 'env'}
+                          placeholder={f.source === 'env' ? 'Set on the server' : f.set ? '•••••••• saved. Leave blank to keep' : ''} />
+                      </label>
+                    ))}
+                  </div>
+                </li>
+              </ol>
+              {(SETUP_NOTES[pf.platform] ?? []).length > 0 && (
+                <details className="tips"><summary>Tips for {name}</summary>
+                  <ul className="setup-notes">{SETUP_NOTES[pf.platform]!.map(n => <li key={n}>{n}</li>)}</ul>
+                </details>
+              )}
+              <div className="modal-actions">
+                {step.reconfigure && fields.some(f => f.source === 'saved') && <button className="btn btn-outline btn-sm" style={{ marginRight: 'auto' }} onClick={() => void removeCredentials()}>Remove saved credentials</button>}
+                <button className="btn btn-outline btn-sm" onClick={() => setStep({ kind: 'grid' })}>← Back</button>
+                <button className="btn btn-primary btn-sm" disabled={busy || !ready} onClick={() => void saveAndContinue()}>
+                  {busy ? 'Saving…' : step.reconfigure ? 'Save' : `Save & continue to ${name}`}
+                </button>
+              </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );

@@ -55,6 +55,8 @@ export const api = {
   markRead: (id: string, read: boolean) => request<InboxItem>(`/api/inbox/${id}/read`, json('POST', { read })),
   replyTo: (id: string, text: string) => request<InboxItem>(`/api/inbox/${id}/reply`, json('POST', { text })),
 
+  saveCredentials: (platform: Platform, values: Record<string, string>) => request<ProviderInfo>(`/api/integrations/${platform}`, json('PUT', { values })),
+  clearCredentials: (platform: Platform) => request<ProviderInfo>(`/api/integrations/${platform}`, { method: 'DELETE' }),
   selection: (id: string) => request<{ platform: Platform; accounts: SelectableAccount[] }>(`/api/connect/${id}`),
   confirmSelection: (id: string, externalIds: string[]) => request<{ platform: Platform; count: number }>(`/api/connect/${id}/confirm`, json('POST', { externalIds })),
   cancelSelection: (id: string) => request<void>(`/api/connect/${id}`, { method: 'DELETE' }),

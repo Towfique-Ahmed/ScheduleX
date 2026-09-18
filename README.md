@@ -26,9 +26,11 @@ Set `APP_URL` to your public **https** address and `HOST=0.0.0.0` only behind HT
 
 **For people using ScheduleX:** open **Accounts → Connect social account**, pick a platform (for LinkedIn, choose **Profile** or **Page**), and sign in in the window that opens. If the login has several Pages or boards, you choose which to add. No keys or settings are involved.
 
-**For whoever runs ScheduleX (one time per platform):** each platform only lets a registered developer app sign users in, so you register that app once and put its credentials in `.env`. Everyone using your ScheduleX then connects with a click. This is exactly how tools like Publer and Buffer work; they just registered the apps themselves. A platform without credentials shows a **Needs setup** badge in the connect dialog, with the callback URL to register.
+**For whoever runs ScheduleX (one time per platform):** each platform only lets a registered developer app sign users in. The first time an admin clicks a platform that isn't set up, ScheduleX opens a short guided setup: open the platform's developer portal, create the app, copy the redirect URL shown, paste the app's Client ID and secret, and click **Save & continue**. That goes straight into the platform's sign-in. Credentials are stored encrypted, are never shown again, and can be changed later from the ⚙ on the platform's tile. After that, everyone using your ScheduleX connects with a click. This is how Publer and Buffer work too; they just registered the apps themselves.
 
-| Platform | Env vars | Notes |
+Environment variables (below) still work and take precedence over saved credentials, which suits deployments configured through the server environment.
+
+| Platform | Env vars (optional if entered in the app) | Notes |
 |---|---|---|
 | X | `X_CLIENT_ID` (`X_CLIENT_SECRET` if confidential) | Free tier has a small monthly post limit. |
 | LinkedIn | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Add "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". Company **Pages** additionally need LinkedIn's Community Management API product (LinkedIn approves it). Tokens last ~60 days, then reconnect. No analytics API for personal profiles. |

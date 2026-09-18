@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { audience, collectAllMetrics, publishingStats, reportCsv } from './analytics.ts';
 import { fetchAllInboxes, sendReply } from './inbox.ts';
+import { clearCredentials, credentialFields, saveCredentials } from './credentials.ts';
 import { authRouter, originCheck, requireRole, requireUser, sessionMiddleware, teamRouter, userFrom } from './auth.ts';
 import { config, redirectUri } from './config.ts';
 import { can } from './roles.ts';
@@ -167,6 +168,30 @@ app.delete('/api/connect/:id', requireRole(can.manageAccounts), (req, res) => {
   res.status(204).end();
 });
 
+// ---- App credentials (entered once by an admin instead of editing .env) ----
+const providerInfo = (id: Platform) => {
+  const p = providers[id]!;
+  return {
+    platform: id, supported: true, configured: p.configured(), envVars: p.envVars, redirectUri: redirectUri(id),
+    credentials: credentialFields(p), variants: p.variants ?? [], mediaMimes: p.mediaMimes, maxMedia: p.maxMedia, requiresMedia: !!p.requiresMedia,
+  };
+};
+
+app.put('/api/integrations/:platform', requireRole(can.manageAccounts), (req, res) => {
+  const p = providers[req.params.platform as Platform];
+  if (!p) return res.status(404).json({ error: 'Unknown platform' });
+  const problem = saveCredentials(p, req.body?.values);
+  if (problem) return res.status(400).json({ error: problem });
+  res.json(providerInfo(req.params.platform as Platform));
+});
+
+app.delete('/api/integrations/:platform', requireRole(can.manageAccounts), (req, res) => {
+  const p = providers[req.params.platform as Platform];
+  if (!p) return res.status(404).json({ error: 'Unknown platform' });
+  clearCredentials(p);
+  res.json(providerInfo(req.params.platform as Platform));
+});
+
 // ---- Providers ------------------------------------------------------------
 app.get('/api/providers', (_req, res) => {
   res.json(
@@ -178,6 +203,7 @@ app.get('/api/providers', (_req, res) => {
         configured: !!p?.configured(),
         envVars: p?.envVars ?? [],
         redirectUri: p ? redirectUri(id) : null,
+        credentials: p ? credentialFields(p) : [],
         variants: p?.variants ?? [],
         mediaMimes: p?.mediaMimes ?? [],
         maxMedia: p?.maxMedia ?? 0,

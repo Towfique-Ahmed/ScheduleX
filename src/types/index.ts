@@ -17,6 +17,7 @@ export interface ProviderInfo {
   configured: boolean;
   envVars: string[];
   redirectUri: string | null;
+  credentials: { name: string; label: string; secret: boolean; required: boolean; set: boolean; source: 'env' | 'saved' | null }[];
   variants: { id: string; label: string; description: string; scopes?: string[] }[];
   mediaMimes: string[];
   maxMedia: number;

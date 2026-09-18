@@ -1189,3 +1189,14 @@ a.btn { text-decoration: none; display: inline-block; }
 .brand-row { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
 .scope-list { list-style: none; text-align: left; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; margin-top: 4px; width: 100%; }
 .scope-list li::before { content: '✓ '; color: var(--success); }
+.connect-tile-wrap { position: relative; display: flex; }
+.connect-tile-wrap .connect-tile { flex: 1; }
+.tile-gear { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; border-radius: 6px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; font-size: 14px; }
+.tile-gear:hover, .tile-gear:focus-visible { background: var(--bg); color: var(--text); outline: none; }
+.wizard { padding-left: 20px; display: flex; flex-direction: column; gap: 16px; font-size: 14px; }
+.wizard li > div { margin-top: 8px; }
+.copy-row { display: flex; align-items: center; gap: 8px; }
+.copy-row .setup-code { flex: 1; margin: 0; }
+.cred-fields { display: flex; flex-direction: column; gap: 10px; }
+.tips { margin-top: 12px; font-size: 13px; color: var(--text-secondary); }
+.tips summary { cursor: pointer; }

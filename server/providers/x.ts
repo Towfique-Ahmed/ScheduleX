@@ -1,8 +1,9 @@
+import { cred } from '../credentials.ts';
 import fs from 'node:fs';
 import { isDeadGrant, LocalMedia, Provider, ProviderError, readJson } from './types.ts';
 
-const clientId = () => process.env.X_CLIENT_ID ?? '';
-const clientSecret = () => process.env.X_CLIENT_SECRET ?? '';
+const clientId = () => cred('X_CLIENT_ID');
+const clientSecret = () => cred('X_CLIENT_SECRET');
 
 // Confidential clients authenticate the token endpoint with HTTP Basic; public clients send client_id in the body.
 function tokenRequest(body: Record<string, string>) {
@@ -41,6 +42,7 @@ export const x: Provider = {
   id: 'twitter',
   name: 'X (Twitter)',
   envVars: ['X_CLIENT_ID'],
+  optionalEnvVars: ['X_CLIENT_SECRET'],
   usesPkce: true,
   mediaMimes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
   maxMedia: 4,

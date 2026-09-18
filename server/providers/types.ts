@@ -46,6 +46,8 @@ export interface Provider {
   name: string;
   /** Env vars that must be set for this provider to be usable. */
   envVars: string[];
+  /** Settings that improve behaviour but aren't required (e.g. X client secret for confidential apps). */
+  optionalEnvVars?: string[];
   usesPkce: boolean;
   configured(): boolean;
   /** Ways to connect this platform (e.g. LinkedIn Profile vs Page). Omitted when there is only one. */
