@@ -49,7 +49,7 @@ export interface Provider {
   usesPkce: boolean;
   configured(): boolean;
   /** Ways to connect this platform (e.g. LinkedIn Profile vs Page). Omitted when there is only one. */
-  variants?: { id: string; label: string; description: string }[];
+  variants?: { id: string; label: string; description: string; /** OAuth scopes requested, shown to the user before they leave for the platform. */ scopes?: string[] }[];
   authUrl(params: { state: string; challenge: string; verifier: string; redirectUri: string; variant?: string }): string;
   exchange(params: { code: string; verifier: string; redirectUri: string }): Promise<Tokens>;
   profile(accessToken: string): Promise<Profile>;

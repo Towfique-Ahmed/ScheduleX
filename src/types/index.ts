@@ -17,7 +17,7 @@ export interface ProviderInfo {
   configured: boolean;
   envVars: string[];
   redirectUri: string | null;
-  variants: { id: string; label: string; description: string }[];
+  variants: { id: string; label: string; description: string; scopes?: string[] }[];
   mediaMimes: string[];
   maxMedia: number;
   requiresMedia: boolean;

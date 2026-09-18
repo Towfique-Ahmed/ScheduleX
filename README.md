@@ -38,6 +38,27 @@ Set `APP_URL` to your public **https** address and `HOST=0.0.0.0` only behind HT
 
 **Status:** the provider code follows each platform's documented API and is covered by tests that mock the network, but has not been exercised against the live APIs. Expect to fix small differences on first connect.
 
+## LinkedIn: what the consent screen shows
+
+LinkedIn (not ScheduleX) draws the "**<your app> would like to…**" screen. It shows your app's **name and logo** from the LinkedIn developer portal, the **permissions (scopes)** ScheduleX asks for, and "You will be redirected to" your `APP_URL`.
+
+Creating the LinkedIn app: go to linkedin.com/developers → Create app → associate it with a LinkedIn **Company Page** (that Page's admin must verify the app) → set the name and logo → Products: add *Sign In with LinkedIn using OpenID Connect* and *Share on LinkedIn* → Auth: add the redirect URL shown in the connect dialog.
+
+Out of the box ScheduleX asks only for what it uses: your name/photo and permission to post (Profile), plus the Pages you administer and permission to post as them (Page). Bigger apps such as Publer show a long list because LinkedIn approved them for analytics, comments and ads. If LinkedIn approves your app for more, add the scopes in `.env`:
+
+| Consent-screen line | Scope | LinkedIn product needed | Used by ScheduleX today? |
+|---|---|---|---|
+| Use your name and photo | `profile` (`openid`) | Sign In with LinkedIn (OpenID) | Yes |
+| Create posts on your behalf | `w_member_social` | Share on LinkedIn | Yes |
+| Create posts on your Pages' behalf | `w_organization_social` | Community Management API | Yes |
+| See which Pages you manage | `r_organization_admin` | Community Management API | Yes |
+| Read your posts and their reporting data | `r_member_social` | restricted, by approval | No (requesting it is harmless but unused) |
+| Read your Pages' posts, comments, reactions | `r_organization_social` | Community Management API | No |
+| Read your Pages' follower data | `r_organization_followers` | Community Management API | No |
+| Manage advertising accounts / reports | `rw_ads`, `r_ads_reporting` | Advertising API | No |
+
+Scope names and product requirements are from LinkedIn's documentation as I know it; confirm them in your app's **Products** tab. Adding scopes only changes what LinkedIn shows and grants; ScheduleX doesn't yet read LinkedIn analytics or comments.
+
 ## Roles
 
 | Role | Can |

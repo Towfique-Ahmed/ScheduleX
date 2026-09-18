@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../context/AppContext';
 import { CONNECT_CHANNEL, ConnectMessage, connectInThisTab, openConnectWindow } from '../utils/connect';
-import { platformConfig, SETUP_NOTES } from '../utils/platforms';
+import { platformConfig, SCOPE_TEXT, SETUP_NOTES } from '../utils/platforms';
 import { Platform, ProviderInfo, SelectableAccount } from '../types';
 
 type Step =
@@ -151,16 +151,28 @@ export default function ConnectDialog({ onClose, onResult, resume, selectId }: P
 
         {step.kind === 'variant' && (
           <>
-            <p className="hint" style={{ marginTop: 0 }}>What do you want to connect?</p>
+            <div className="brand-row">
+              <span className="connect-tile-icon" style={{ background: platformConfig[step.provider.platform].color }}>{platformConfig[step.provider.platform].icon}</span>
+              <div>
+                <strong>{platformConfig[step.provider.platform].name}</strong>
+                <div className="hint">What do you want to connect?</div>
+              </div>
+            </div>
             <div className="variant-row">
               {step.provider.variants.map(v => (
                 <button key={v.id} className="connect-tile variant-tile" onClick={() => start(step.provider.platform, v.id)}>
                   <span className="variant-icon" aria-hidden>{v.id === 'page' ? '🏢' : '👤'}</span>
                   <span className="connect-tile-name">{v.label}</span>
                   <span className="hint">{v.description}</span>
+                  {v.scopes && (
+                    <ul className="scope-list" aria-label={`${v.label} permissions`}>
+                      {v.scopes.filter(sc => sc !== 'openid').map(sc => <li key={sc}>{SCOPE_TEXT[sc] ?? sc}</li>)}
+                    </ul>
+                  )}
                 </button>
               ))}
             </div>
+            <p className="hint">Next you'll sign in on {platformConfig[step.provider.platform].name} and approve exactly these permissions. You can revoke them there at any time.</p>
             <div className="modal-actions"><button className="btn btn-outline btn-sm" onClick={() => setStep({ kind: 'grid' })}>← Back</button></div>
           </>
         )}

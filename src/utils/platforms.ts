@@ -19,8 +19,9 @@ export function formatNumber(n: number): string {
 export const SETUP_NOTES: Partial<Record<Platform, string[]>> = {
   twitter: ['Enable OAuth 2.0 with "Read and write" permissions. Free-tier apps have a low monthly post limit.'],
   linkedin: [
-    'Add the products "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn".',
-    'To post to company Pages, also request the Community Management API product (LinkedIn reviews it).',
+    'Create the app at linkedin.com/developers and associate it with a LinkedIn Company Page. The Page’s admin must verify the app.',
+    'Set the app name and logo: they appear on LinkedIn’s consent screen (“<your app> would like to…”).',
+    'Add the products “Sign In with LinkedIn using OpenID Connect” and “Share on LinkedIn”. To connect company Pages, also request the Community Management API (LinkedIn reviews it).',
   ],
   facebook: [
     'Create a Meta app (type: Business) and add the Facebook Login product.',
@@ -52,3 +53,26 @@ export function mediaProblem(platforms: Platform[], providers: ProviderInfo[], f
   }
   return null;
 }
+
+/**
+ * Plain-language meaning of OAuth scopes, so people know what they're approving before LinkedIn's
+ * consent screen. Unknown scopes are shown as-is rather than hidden.
+ */
+export const SCOPE_TEXT: Record<string, string> = {
+  openid: 'Confirm who you are',
+  profile: 'Use your name and photo',
+  email: 'Use your primary email address',
+  w_member_social: 'Create posts on your behalf',
+  r_member_social: 'Read your posts and their reporting data',
+  r_member_profileAnalytics: 'Read your profile analytics',
+  r_1st_connections_size: 'See how many connections you have',
+  r_organization_admin: 'See which Pages you manage',
+  rw_organization_admin: 'Manage your Pages and read their reporting',
+  w_organization_social: 'Create posts on your Pages’ behalf',
+  r_organization_social: 'Read your Pages’ posts, comments and reactions',
+  w_organization_social_feed: 'Comment and react on your Pages’ posts',
+  r_organization_followers: 'Read your Pages’ follower data',
+  r_ads: 'See your advertising accounts',
+  rw_ads: 'Manage your advertising accounts',
+  r_ads_reporting: 'Read advertising reports',
+};

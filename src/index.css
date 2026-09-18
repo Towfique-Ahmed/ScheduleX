@@ -1186,3 +1186,6 @@ a.btn { text-decoration: none; display: inline-block; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
 .select-list { list-style: none; display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow: auto; margin-top: 12px; }
 .select-list li { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.brand-row { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.scope-list { list-style: none; text-align: left; font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; margin-top: 4px; width: 100%; }
+.scope-list li::before { content: '✓ '; color: var(--success); }

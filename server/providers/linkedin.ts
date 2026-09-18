@@ -12,6 +12,22 @@ const restHeaders = (accessToken: string) => ({
   'LinkedIn-Version': config.linkedinApiVersion,
 });
 
+/**
+ * Scopes requested on LinkedIn's consent screen. The defaults work for any app with the self-serve products.
+ * Apps LinkedIn has approved for more (analytics, comments, ads reporting…) add scopes via
+ * LINKEDIN_SCOPES_PROFILE / LINKEDIN_SCOPES_PAGE (space or comma separated). Requesting a scope the app
+ * isn't approved for makes LinkedIn reject the whole sign-in, so extras are opt-in.
+ */
+const BASE_SCOPES = {
+  profile: ['openid', 'profile', 'w_member_social'],
+  page: ['openid', 'profile', 'r_organization_admin', 'w_organization_social'],
+};
+export function linkedinScopes(variant: 'profile' | 'page'): string[] {
+  const extra = (process.env[variant === 'page' ? 'LINKEDIN_SCOPES_PAGE' : 'LINKEDIN_SCOPES_PROFILE'] ?? '')
+    .split(/[\s,]+/).filter(sc => /^[a-z][a-z0-9_]{1,60}$/.test(sc)); // scope names only; anything else is dropped
+  return [...new Set([...BASE_SCOPES[variant], ...extra])];
+}
+
 /** Page accounts are stored as "org:<id>"; anything else is a member's personal profile id. */
 const authorUrn = (externalId: string) =>
   externalId.startsWith('org:') ? `urn:li:organization:${externalId.slice(4)}` : `urn:li:person:${externalId}`;
@@ -40,10 +56,12 @@ export const linkedin: Provider = {
   name: 'LinkedIn',
   envVars: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'],
   usesPkce: false,
-  variants: [
-    { id: 'profile', label: 'Profile', description: 'Post to your personal LinkedIn profile' },
-    { id: 'page', label: 'Page', description: 'Post to a company Page you administer' },
-  ],
+  get variants() {
+    return [
+      { id: 'profile', label: 'Profile', description: 'Post to your personal LinkedIn profile', scopes: linkedinScopes('profile') },
+      { id: 'page', label: 'Page', description: 'Post to a company Page you administer', scopes: linkedinScopes('page') },
+    ];
+  },
   mediaMimes: ['image/jpeg', 'image/png', 'image/gif'],
   maxMedia: 9,
   configured: () => !!clientId() && !!clientSecret(),
@@ -54,7 +72,7 @@ export const linkedin: Provider = {
       client_id: clientId(),
       redirect_uri: redirectUri,
       // Company Pages need LinkedIn's Community Management API product for the organization scopes.
-      scope: variant === 'page' ? 'openid profile r_organization_admin w_organization_social' : 'openid profile w_member_social',
+      scope: linkedinScopes(variant === 'page' ? 'page' : 'profile').join(' '),
       state,
     });
     return `https://www.linkedin.com/oauth/v2/authorization?${q}`;
