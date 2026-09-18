@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { api, CreatePostInput, PostInput } from '../api';
-import { AnalyticsData, Category, MediaItem, Post, ProviderInfo, Slot, SocialAccount } from '../types';
+import { AnalyticsData, Category, MediaItem, Post, ProviderInfo, Slot, SocialAccount, User } from '../types';
 
 interface AppState {
   posts: Post[];
@@ -9,12 +9,16 @@ interface AppState {
   media: MediaItem[];
   categories: Category[];
   slots: Slot[];
+  members: User[];
   analytics: AnalyticsData[];
   loading: boolean;
   error: string | null;
   createPost: (input: CreatePostInput) => Promise<Post>;
-  updatePost: (id: string, patch: Partial<PostInput> & { action?: 'draft' | 'schedule' | 'publish'; scheduledAt?: string }) => Promise<Post>;
+  updatePost: (id: string, patch: Partial<PostInput> & { action?: 'draft' | 'submit' | 'schedule' | 'publish'; scheduledAt?: string }) => Promise<Post>;
   retryPost: (id: string) => Promise<void>;
+  approvePost: (id: string) => Promise<void>;
+  rejectPost: (id: string, note: string) => Promise<void>;
+  withdrawPost: (id: string) => Promise<void>;
   deletePost: (id: string) => Promise<void>;
   disconnectAccount: (id: string) => Promise<void>;
   uploadMedia: (file: File) => Promise<MediaItem>;
@@ -34,15 +38,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [members, setMembers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [p, a, pr, m, c, s] = await Promise.all([
-        api.posts(), api.accounts(), api.providers(), api.media(), api.categories(), api.slots(),
+      const [p, a, pr, m, c, s, mem] = await Promise.all([
+        api.posts(), api.accounts(), api.providers(), api.media(), api.categories(), api.slots(), api.members(),
       ]);
-      setPosts(p); setAccounts(a); setProviders(pr); setMedia(m); setCategories(c); setSlots(s);
+      setPosts(p); setAccounts(a); setProviders(pr); setMedia(m); setCategories(c); setSlots(s); setMembers(mem);
       setError(null);
     } catch {
       setError('Cannot reach the ScheduleX server. Start it with `npm run dev`.');
@@ -74,6 +79,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const post = await api.retryPost(id);
     setPosts(prev => prev.map(p => (p.id === id ? post : p)));
   }, []);
+
+  const replace = (post: Post) => setPosts(prev => prev.map(p => (p.id === post.id ? post : p)));
+  const approvePost = useCallback(async (id: string) => replace(await api.approvePost(id)), []);
+  const rejectPost = useCallback(async (id: string, note: string) => replace(await api.rejectPost(id, note)), []);
+  const withdrawPost = useCallback(async (id: string) => replace(await api.withdrawPost(id)), []);
 
   const deletePost = useCallback(async (id: string) => {
     await api.deletePost(id);
@@ -123,8 +133,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
-        posts, accounts, providers, media, categories, slots, analytics, loading, error,
-        createPost, updatePost, retryPost, deletePost, disconnectAccount,
+        posts, accounts, providers, media, categories, slots, members, analytics, loading, error,
+        createPost, updatePost, retryPost, approvePost, rejectPost, withdrawPost, deletePost, disconnectAccount,
         uploadMedia, deleteMedia, createCategory, deleteCategory, saveSlots, refresh,
       }}
     >

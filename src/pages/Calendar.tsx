@@ -1,19 +1,24 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { platformConfig } from '../utils/platforms';
 import { dayKey } from '../utils/queue';
 import { Post } from '../types';
 
 type View = 'month' | 'week';
 
-const editable = (p: Post) => p.status === 'draft' || p.status === 'scheduled' || p.status === 'failed';
+const editableStatus = (p: Post) => p.status === 'draft' || p.status === 'scheduled' || p.status === 'failed';
 const when = (p: Post) => new Date(p.scheduledAt ?? p.publishedAt ?? p.createdAt);
 const timeLabel = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
 export default function Calendar() {
   const { posts, categories, slots, updatePost } = useApp();
   const navigate = useNavigate();
+  const { user, can } = useAuth();
+  // Contributors can open their own drafts; only editors can move things around on the calendar.
+  const editable = (p: Post) => editableStatus(p) && (can.publishDirectly || (p.createdBy === user!.id && p.status === 'draft'));
+  const draggable = (p: Post) => editableStatus(p) && can.publishDirectly;
   const [view, setView] = useState<View>('month');
   const [cursor, setCursor] = useState(new Date());
   const [dragId, setDragId] = useState<string | null>(null);
@@ -98,11 +103,11 @@ export default function Calendar() {
         key={p.id}
         className={`cell-post cal-chip status-${p.status} ${dragId === p.id ? 'dragging' : ''}`}
         style={color ? { borderLeft: `3px solid ${color}` } : undefined}
-        draggable={editable(p)}
+        draggable={draggable(p)}
         onDragStart={e => { e.dataTransfer.setData('text/plain', p.id); e.dataTransfer.effectAllowed = 'move'; setDragId(p.id); }}
         onDragEnd={() => { setDragId(null); setOverKey(null); }}
         onClick={() => navigate(editable(p) ? `/compose/${p.id}` : '/posts')}
-        title={`${p.content}\n\n${editable(p) ? 'Drag to reschedule · click to edit' : 'Published'}`}
+        title={`${p.content}\n\n${draggable(p) ? 'Drag to reschedule · click to edit' : editable(p) ? 'Click to edit' : p.status === 'pending_approval' ? 'Awaiting approval' : 'Published'}`}
         role="button" tabIndex={0}
         onKeyDown={e => { if (e.key === 'Enter') navigate(editable(p) ? `/compose/${p.id}` : '/posts'); }}
       >
@@ -121,7 +126,7 @@ export default function Calendar() {
     <div className="calendar-page">
       <div className="page-header">
         <h1>Calendar</h1>
-        <p className="subtitle">Drag posts to reschedule them. Drag a draft onto a day to schedule it.</p>
+        <p className="subtitle">{can.publishDirectly ? 'Drag posts to reschedule them. Drag a draft onto a day to schedule it.' : 'Your team’s scheduled content.'}</p>
       </div>
 
       {notice && (
@@ -131,7 +136,7 @@ export default function Calendar() {
         </div>
       )}
 
-      {drafts.length > 0 && (
+      {can.publishDirectly && drafts.length > 0 && (
         <div className="card draft-tray">
           <div className="card-header"><h2>Unscheduled drafts</h2></div>
           <div className="tray-items">

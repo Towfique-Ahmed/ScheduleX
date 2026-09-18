@@ -2,42 +2,53 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import express from 'express';
+import { authRouter, originCheck, requireRole, requireUser, sessionMiddleware, teamRouter, userFrom } from './auth.ts';
 import { config, redirectUri } from './config.ts';
+import { can } from './roles.ts';
 import { publishPost, storeTokens } from './publisher.ts';
 import { allPlatforms, providers } from './providers/index.ts';
 import { startScheduler } from './scheduler.ts';
-import { data, mediaDir, save, Platform, StoredAccount, StoredMedia, StoredPost } from './store.ts';
+import { data, mediaDir, save, Platform, StoredAccount, StoredMedia, StoredPost, User } from './store.ts';
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+app.use('/api', sessionMiddleware, originCheck);
+
+// ---- Public: sign-in, and media by unguessable URL (Instagram must fetch images from a public link) ----
+app.use('/api', authRouter);
+app.get('/api/media/file/:filename', (req, res) => {
+  const m = data().media.find(x => x.filename === req.params.filename);
+  if (!m) return res.status(404).end();
+  res.setHeader('Content-Type', m.mime);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Cache-Control', 'private, max-age=86400');
+  res.sendFile(path.join(mediaDir, m.filename));
+});
+
+
+
 
 // Never leak tokens to the browser.
 const publicAccount = ({ accessToken, refreshToken, ...rest }: StoredAccount) => ({ ...rest, connected: !rest.needsReconnect });
 
-// ---- Providers ------------------------------------------------------------
-app.get('/api/providers', (_req, res) => {
-  res.json(
-    allPlatforms.map(id => {
-      const p = providers[id];
-      return {
-        platform: id,
-        supported: !!p,
-        configured: !!p?.configured(),
-        envVars: p?.envVars ?? [],
-        redirectUri: p ? redirectUri(id) : null,
-      };
-    }),
-  );
-});
-
 // ---- OAuth ------------------------------------------------------------------
-interface Pending { platform: Platform; verifier: string; expires: number }
+interface Pending { platform: Platform; verifier: string; expires: number; userId: string }
 const pending = new Map<string, Pending>();
 
 const b64url = (b: Buffer) => b.toString('base64url');
 const back = (params: Record<string, string>) => `${config.appUrl}/accounts?${new URLSearchParams(params)}`;
 
+/** OAuth endpoints are browser navigations, so failures redirect back with a message instead of returning JSON. */
+function adminOrRedirect(res: express.Response): User | null {
+  const user = res.locals.user as User | undefined;
+  if (!user) { res.redirect(back({ error: 'Sign in to connect an account.' })); return null; }
+  if (!can.manageAccounts(user.role)) { res.redirect(back({ error: 'Only admins can connect accounts.' })); return null; }
+  return user;
+}
+
 app.get('/api/auth/:platform/start', (req, res) => {
+  const user = adminOrRedirect(res);
+  if (!user) return;
   const platform = req.params.platform as Platform;
   const provider = providers[platform];
   if (!provider) return res.redirect(back({ error: 'This platform is not supported yet.' }));
@@ -47,18 +58,20 @@ app.get('/api/auth/:platform/start', (req, res) => {
   const state = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(48));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
-  pending.set(state, { platform, verifier, expires: Date.now() + 10 * 60 * 1000 });
+  pending.set(state, { platform, verifier, userId: user.id, expires: Date.now() + 10 * 60 * 1000 });
   res.redirect(provider.authUrl({ state, challenge, redirectUri: redirectUri(platform) }));
 });
 
 app.get('/api/auth/:platform/callback', async (req, res) => {
+  const user = adminOrRedirect(res);
+  if (!user) return;
   const platform = req.params.platform as Platform;
   const provider = providers[platform];
   const { code, state, error, error_description } = req.query as Record<string, string | undefined>;
   const entry = state ? pending.get(state) : undefined;
   if (state) pending.delete(state);
 
-  if (!provider || !entry || entry.platform !== platform || entry.expires < Date.now()) {
+  if (!provider || !entry || entry.platform !== platform || entry.userId !== user.id || entry.expires < Date.now()) {
     return res.redirect(back({ error: 'The connection attempt expired or was invalid. Please try again.' }));
   }
   if (error || !code) return res.redirect(back({ error: error_description ?? error ?? 'Authorization was cancelled.' }));
@@ -91,10 +104,31 @@ app.get('/api/auth/:platform/callback', async (req, res) => {
   }
 });
 
+
+// ---- Everything below requires a signed-in user ----
+app.use('/api', requireUser);
+app.use('/api', teamRouter);
+
+// ---- Providers ------------------------------------------------------------
+app.get('/api/providers', (_req, res) => {
+  res.json(
+    allPlatforms.map(id => {
+      const p = providers[id];
+      return {
+        platform: id,
+        supported: !!p,
+        configured: !!p?.configured(),
+        envVars: p?.envVars ?? [],
+        redirectUri: p ? redirectUri(id) : null,
+      };
+    }),
+  );
+});
+
 // ---- Accounts ---------------------------------------------------------------
 app.get('/api/accounts', (_req, res) => res.json(data().accounts.map(publicAccount)));
 
-app.delete('/api/accounts/:id', (req, res) => {
+app.delete('/api/accounts/:id', requireRole(can.manageAccounts), (req, res) => {
   const db = data();
   const idx = db.accounts.findIndex(a => a.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
@@ -125,7 +159,7 @@ const publicMedia = (m: StoredMedia) => ({
 
 app.get('/api/media', (_req, res) => res.json(data().media.map(publicMedia)));
 
-app.post('/api/media', express.raw({ type: () => true, limit: '25mb' }), (req, res) => {
+app.post('/api/media', requireRole(can.draft), express.raw({ type: ['image/*', 'video/*'], limit: '25mb' }), (req, res) => {
   const body = req.body as Buffer;
   if (!Buffer.isBuffer(body) || body.length === 0) return res.status(400).json({ error: 'No file received' });
   const mime = sniffMime(body);
@@ -142,20 +176,11 @@ app.post('/api/media', express.raw({ type: () => true, limit: '25mb' }), (req, r
   res.status(201).json(publicMedia(media));
 });
 
-app.get('/api/media/file/:filename', (req, res) => {
-  const m = data().media.find(x => x.filename === req.params.filename);
-  if (!m) return res.status(404).end();
-  res.setHeader('Content-Type', m.mime);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Cache-Control', 'private, max-age=86400');
-  res.sendFile(path.join(mediaDir, m.filename));
-});
-
-app.delete('/api/media/:id', (req, res) => {
+app.delete('/api/media/:id', requireRole(can.deleteMedia), (req, res) => {
   const db = data();
   const idx = db.media.findIndex(m => m.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  if (db.posts.some(p => p.status !== 'published' && p.mediaIds.includes(req.params.id))) {
+  if (db.posts.some(p => p.status !== 'published' && p.mediaIds.includes(String(req.params.id)))) {
     return res.status(409).json({ error: 'This file is attached to a draft or scheduled post.' });
   }
   const [m] = db.media.splice(idx, 1);
@@ -167,7 +192,7 @@ app.delete('/api/media/:id', (req, res) => {
 // ---- Categories & queue slots -------------------------------------------------
 app.get('/api/categories', (_req, res) => res.json(data().categories));
 
-app.post('/api/categories', (req, res) => {
+app.post('/api/categories', requireRole(can.manageCategories), (req, res) => {
   const name = String(req.body?.name ?? '').trim();
   const color = String(req.body?.color ?? '#6366f1');
   if (!name || name.length > 40) return res.status(400).json({ error: 'Name must be 1–40 characters' });
@@ -179,7 +204,7 @@ app.post('/api/categories', (req, res) => {
   res.status(201).json(category);
 });
 
-app.delete('/api/categories/:id', (req, res) => {
+app.delete('/api/categories/:id', requireRole(can.manageCategories), (req, res) => {
   const db = data();
   const idx = db.categories.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
@@ -191,7 +216,7 @@ app.delete('/api/categories/:id', (req, res) => {
 
 app.get('/api/slots', (_req, res) => res.json(data().slots));
 
-app.put('/api/slots', (req, res) => {
+app.put('/api/slots', requireRole(can.manageSlots), (req, res) => {
   const slots = req.body?.slots;
   if (!Array.isArray(slots) || slots.length > 100) return res.status(400).json({ error: 'slots must be an array' });
   const seen = new Set<string>();
@@ -262,33 +287,42 @@ const platformsOf = (accountIds: string[]) =>
 
 app.get('/api/posts', (_req, res) => res.json(data().posts));
 
+const DIRECT = 'You can save drafts and submit posts for approval, but an editor has to schedule or publish.';
+
 app.post('/api/posts', async (req, res) => {
+  const user = userFrom(res);
   const body = req.body ?? {};
   const action = body.action;
-  if (!['draft', 'schedule', 'publish'].includes(action)) return res.status(400).json({ error: 'Invalid action' });
+  if (!['draft', 'submit', 'schedule', 'publish'].includes(action)) return res.status(400).json({ error: 'Invalid action' });
+  if (!can.draft(user.role)) return res.status(403).json({ error: 'Viewers cannot create posts' });
+  if ((action === 'schedule' || action === 'publish') && !can.publishDirectly(user.role)) return res.status(403).json({ error: DIRECT });
+
   const parsed = parseFields({ mediaIds: [], categoryId: null, evergreen: null, accounts: [], ...body });
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
   const f = parsed.fields as PostFields;
   if (action !== 'draft' && f.accounts.length === 0) return res.status(400).json({ error: 'Select at least one connected account' });
 
   let scheduledAt: string | null = null;
-  if (action === 'schedule') {
+  if (action === 'schedule' || (action === 'submit' && body.scheduledAt)) {
     const s = parseSchedule(body.scheduledAt);
     if ('error' in s) return res.status(400).json({ error: s.error });
     scheduledAt = s.at;
   }
 
+  const now = new Date().toISOString();
   const post: StoredPost = {
     id: crypto.randomUUID(),
     ...f,
     platforms: platformsOf(f.accounts),
     scheduledAt,
     publishedAt: null,
-    status: action === 'draft' ? 'draft' : 'scheduled',
+    status: action === 'draft' ? 'draft' : action === 'submit' ? 'pending_approval' : 'scheduled',
     recycledAt: null,
     recycledFrom: null,
     results: [],
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    createdBy: user.id,
+    approval: action === 'submit' ? { requestedBy: user.id, requestedAt: now, decision: null, decidedBy: null, decidedAt: null, note: null } : null,
   };
   data().posts.push(post);
   save();
@@ -298,11 +332,25 @@ app.post('/api/posts', async (req, res) => {
 
 // Edit a post that has not been published yet (also used by calendar drag-and-drop to reschedule).
 app.patch('/api/posts/:id', async (req, res) => {
+  const user = userFrom(res);
   const post = data().posts.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Not found' });
   if (post.status === 'published' || post.status === 'publishing') return res.status(409).json({ error: 'Published posts cannot be edited' });
+  if (post.status === 'pending_approval') return res.status(409).json({ error: 'This post is waiting for approval. Withdraw it to edit.' });
 
   const body = req.body ?? {};
+  const direct = can.publishDirectly(user.role);
+  if (!direct) {
+    // Contributors may only work on their own drafts, and only save or submit them.
+    if (!can.draft(user.role) || post.createdBy !== user.id || post.status !== 'draft') {
+      return res.status(403).json({ error: 'You can only edit your own drafts.' });
+    }
+    if (body.action === 'schedule' || body.action === 'publish' || (!body.action && 'scheduledAt' in body)) {
+      return res.status(403).json({ error: DIRECT });
+    }
+  }
+  if (body.action !== undefined && !['draft', 'submit', 'schedule', 'publish'].includes(body.action)) return res.status(400).json({ error: 'Invalid action' });
+
   const parsed = parseFields(body);
   if ('error' in parsed) return res.status(400).json({ error: parsed.error });
 
@@ -313,6 +361,14 @@ app.patch('/api/posts/:id', async (req, res) => {
   if (body.action === 'draft') {
     next.status = 'draft';
     next.scheduledAt = null;
+  } else if (body.action === 'submit') {
+    if (body.scheduledAt) {
+      const s = parseSchedule(body.scheduledAt);
+      if ('error' in s) return res.status(400).json({ error: s.error });
+      next.scheduledAt = s.at;
+    } else next.scheduledAt = null;
+    next.status = 'pending_approval';
+    next.approval = { requestedBy: user.id, requestedAt: new Date().toISOString(), decision: null, decidedBy: null, decidedAt: null, note: null };
   } else if (body.action === 'publish') {
     next.status = 'scheduled';
     next.scheduledAt = null;
@@ -330,7 +386,60 @@ app.patch('/api/posts/:id', async (req, res) => {
   res.json(post);
 });
 
-app.post('/api/posts/:id/retry', async (req, res) => {
+// ---- Approval workflow ---------------------------------------------------------
+const pendingPost = (id: string) => {
+  const p = data().posts.find(x => x.id === id);
+  return p?.status === 'pending_approval' && p.approval ? p : null;
+};
+
+app.get('/api/approvals', requireRole(can.approve), (_req, res) => {
+  res.json(data().posts.filter(p => p.status === 'pending_approval'));
+});
+
+app.post('/api/posts/:id/approve', requireRole(can.approve), (req, res) => {
+  const post = pendingPost(String(req.params.id));
+  if (!post) return res.status(409).json({ error: 'This post is not waiting for approval' });
+  let at: string;
+  if (req.body?.scheduledAt) {
+    const s = parseSchedule(req.body.scheduledAt);
+    if ('error' in s) return res.status(400).json({ error: s.error });
+    at = s.at;
+  } else {
+    // Keep the requested time if it is still in the future; otherwise publish as soon as possible.
+    at = post.scheduledAt && new Date(post.scheduledAt).getTime() > Date.now() ? post.scheduledAt : new Date().toISOString();
+  }
+  post.scheduledAt = at;
+  post.status = 'scheduled';
+  post.approval = { ...post.approval!, decision: 'approved', decidedBy: userFrom(res).id, decidedAt: new Date().toISOString(), note: req.body?.note ? String(req.body.note).slice(0, 500) : null };
+  save();
+  res.json(post);
+});
+
+app.post('/api/posts/:id/reject', requireRole(can.approve), (req, res) => {
+  const post = pendingPost(String(req.params.id));
+  if (!post) return res.status(409).json({ error: 'This post is not waiting for approval' });
+  const note = String(req.body?.note ?? '').trim().slice(0, 500);
+  if (!note) return res.status(400).json({ error: 'Add a note so the author knows what to change' });
+  post.status = 'draft';
+  post.scheduledAt = null;
+  post.approval = { ...post.approval!, decision: 'rejected', decidedBy: userFrom(res).id, decidedAt: new Date().toISOString(), note };
+  save();
+  res.json(post);
+});
+
+app.post('/api/posts/:id/withdraw', (req, res) => {
+  const user = userFrom(res);
+  const post = pendingPost(req.params.id);
+  if (!post) return res.status(409).json({ error: 'This post is not waiting for approval' });
+  if (post.createdBy !== user.id && !can.approve(user.role)) return res.status(403).json({ error: 'Only the author or an editor can withdraw this post' });
+  post.status = 'draft';
+  post.scheduledAt = null;
+  post.approval = null;
+  save();
+  res.json(post);
+});
+
+app.post('/api/posts/:id/retry', requireRole(can.publishDirectly), async (req, res) => {
   const post = data().posts.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Not found' });
   if (post.status !== 'failed') return res.status(409).json({ error: 'Only failed posts can be retried' });
@@ -339,17 +448,21 @@ app.post('/api/posts/:id/retry', async (req, res) => {
 });
 
 app.delete('/api/posts/:id', (req, res) => {
+  const user = userFrom(res);
   const db = data();
   const idx = db.posts.findIndex(p => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Not found' });
+  const post = db.posts[idx];
+  const own = post.createdBy === user.id && post.status === 'draft';
+  if (!can.publishDirectly(user.role) && !own) return res.status(403).json({ error: 'You can only delete your own drafts.' });
   db.posts.splice(idx, 1);
   save();
   res.status(204).end();
 });
 
-// Bound to loopback: this API holds OAuth tokens and has no user login yet.
-app.listen(config.port, '127.0.0.1', () => {
-  console.log(`ScheduleX API on http://127.0.0.1:${config.port}`);
+// Loopback by default; set HOST=0.0.0.0 only behind HTTPS (and set APP_URL to your https address).
+app.listen(config.port, config.host, () => {
+  console.log(`ScheduleX API on http://${config.host}:${config.port}`);
   for (const id of allPlatforms) {
     const p = providers[id];
     if (p) console.log(`  ${p.name}: ${p.configured() ? 'configured' : `not configured (set ${p.envVars.join(', ')})`}`);

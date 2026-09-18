@@ -5,6 +5,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 
 export const config = {
   port: Number(process.env.PORT ?? 3001),
+  host: process.env.HOST ?? '127.0.0.1',
   // Origin the browser uses (the Vite dev server proxies /api to this server).
   // OAuth redirect URIs registered with each platform must be `${appUrl}/api/auth/<provider>/callback`.
   appUrl: (process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, ''),

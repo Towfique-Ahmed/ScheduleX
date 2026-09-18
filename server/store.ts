@@ -18,7 +18,43 @@ export interface StoredAccount {
   connectedAt: string;
 }
 
-export type PostStatus = 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed';
+export type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'publishing' | 'published' | 'failed';
+
+export type Role = 'owner' | 'admin' | 'editor' | 'contributor' | 'viewer';
+
+export interface User {
+  id: string;
+  email: string;
+  name: string;
+  passwordHash: string; // scrypt: salt.hash (base64)
+  role: Role;
+  createdAt: string;
+}
+
+export interface Session {
+  tokenHash: string;
+  userId: string;
+  expiresAt: string;
+}
+
+export interface Invite {
+  id: string;
+  tokenHash: string;
+  role: Role;
+  createdBy: string;
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+}
+
+export interface Approval {
+  requestedBy: string;
+  requestedAt: string;
+  decision: 'approved' | 'rejected' | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  note: string | null;
+}
 
 export interface PublishResult {
   accountId: string;
@@ -66,6 +102,8 @@ export interface StoredPost {
   recycledFrom: string | null;
   results: PublishResult[];
   createdAt: string;
+  createdBy: string | null;
+  approval: Approval | null;
 }
 
 interface Db {
@@ -74,10 +112,13 @@ interface Db {
   media: StoredMedia[];
   categories: Category[];
   slots: Slot[];
+  users: User[];
+  sessions: Session[];
+  invites: Invite[];
 }
 
 const file = path.join(config.dataDir, 'db.json');
-let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [] };
+let db: Db = { accounts: [], posts: [], media: [], categories: [], slots: [], users: [], sessions: [], invites: [] };
 
 if (fs.existsSync(file)) db = { ...db, ...JSON.parse(fs.readFileSync(file, 'utf8')) };
 for (const p of db.posts) {
@@ -86,6 +127,8 @@ for (const p of db.posts) {
   p.evergreen ??= null;
   p.recycledAt ??= null;
   p.recycledFrom ??= null;
+  p.createdBy ??= null;
+  p.approval ??= null;
 }
 
 // Anything left mid-publish by a crash is retried rather than stuck forever.

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import MediaThumb from '../components/MediaThumb';
 import UploadButton from '../components/UploadButton';
 
@@ -7,6 +8,7 @@ const size = (n: number) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `$
 
 export default function Library() {
   const { media, posts, deleteMedia } = useApp();
+  const { can } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const usage = (id: string) => posts.filter(p => p.mediaIds.includes(id)).length;
 
@@ -21,7 +23,7 @@ export default function Library() {
         <h1>Media Library</h1>
         <p className="subtitle">Upload images once and reuse them across posts.</p>
       </div>
-      <div className="toolbar-row"><UploadButton /></div>
+      {can.draft && <div className="toolbar-row"><UploadButton /></div>}
       {error && <div className="notice notice-error" role="alert"><span>{error}</span></div>}
       {media.length === 0 ? (
         <div className="card empty-state"><p>No media yet. Upload JPG, PNG, GIF, WebP or MP4 files (up to 25 MB).</p></div>
@@ -34,7 +36,7 @@ export default function Library() {
                 <span className="media-name" title={m.name}>{m.name}</span>
                 <span className="media-sub">{size(m.size)} · used in {usage(m.id)} post{usage(m.id) === 1 ? '' : 's'}</span>
               </div>
-              <button className="btn btn-sm btn-danger" onClick={() => remove(m.id, m.name)}>Delete</button>
+              {can.deleteMedia && <button className="btn btn-sm btn-danger" onClick={() => remove(m.id, m.name)}>Delete</button>}
             </div>
           ))}
         </div>

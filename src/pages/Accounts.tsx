@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import { platformConfig } from '../utils/platforms';
 import { ProviderInfo } from '../types';
 
 export default function Accounts() {
   const { accounts, providers, disconnectAccount, refresh } = useApp();
+  const { can } = useAuth();
   const [params, setParams] = useSearchParams();
   const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
   const [setupFor, setSetupFor] = useState<ProviderInfo | null>(null);
@@ -67,15 +69,15 @@ export default function Accounts() {
                   </span>
                 </div>
                 <div className="account-footer">
-                  {!account.connected && provider && (
+                  {can.manageAccounts && !account.connected && provider && (
                     <button className="btn btn-sm btn-primary" onClick={() => connect(provider)}>Reconnect</button>
                   )}
-                  <button
+                  {can.manageAccounts && <button
                     className="btn btn-sm btn-danger"
                     onClick={() => { if (confirm(`Disconnect ${account.displayName}? Scheduled posts for it will fail.`)) void disconnectAccount(account.id); }}
                   >
                     Disconnect
-                  </button>
+                  </button>}
                 </div>
               </div>
             );
@@ -83,7 +85,7 @@ export default function Accounts() {
         </div>
       )}
 
-      <h2 className="section-title">Add an account</h2>
+      {can.manageAccounts ? <><h2 className="section-title">Add an account</h2>
       <div className="accounts-grid">
         {providers.map(p => {
           const config = platformConfig[p.platform];
@@ -106,7 +108,7 @@ export default function Accounts() {
             </div>
           );
         })}
-      </div>
+      </div></> : <p className="hint">Only admins can connect or disconnect accounts.</p>}
 
       {setupFor && (
         <div className="modal-backdrop" onClick={() => setSetupFor(null)}>

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 
 const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#8b5cf6', '#64748b'];
 
 export default function Categories() {
   const { categories, posts, createCategory, deleteCategory } = useApp();
+  const { can } = useAuth();
   const [name, setName] = useState('');
   const [color, setColor] = useState(PALETTE[0]);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +28,7 @@ export default function Categories() {
 
       <div className="card">
         <div className="card-header"><h2>Your categories</h2></div>
-        <form className="inline-form" onSubmit={add}>
+        {can.manageCategories && <form className="inline-form" onSubmit={add}>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Blog posts, Promotions" maxLength={40} aria-label="Category name" />
           <div className="swatches" role="radiogroup" aria-label="Color">
             {PALETTE.map(c => (
@@ -35,7 +37,7 @@ export default function Categories() {
             ))}
           </div>
           <button className="btn btn-primary btn-sm" disabled={!name.trim()}>Add</button>
-        </form>
+        </form>}
         {error && <div className="field-error" role="alert">{error}</div>}
         {categories.length === 0 ? (
           <div className="empty-state"><p>No categories yet.</p></div>
@@ -46,7 +48,7 @@ export default function Categories() {
                 <span className="cat-dot" style={{ background: c.color }} />
                 <span className="cat-name">{c.name}</span>
                 <span className="cat-count">{posts.filter(p => p.categoryId === c.id).length} posts</span>
-                <button className="btn btn-sm btn-danger" onClick={() => { if (confirm(`Delete "${c.name}"? Posts keep their content but lose this category.`)) void deleteCategory(c.id); }}>Delete</button>
+                {can.manageCategories && <button className="btn btn-sm btn-danger" onClick={() => { if (confirm(`Delete "${c.name}"? Posts keep their content but lose this category.`)) void deleteCategory(c.id); }}>Delete</button>}
               </li>
             ))}
           </ul>

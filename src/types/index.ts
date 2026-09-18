@@ -18,7 +18,31 @@ export interface ProviderInfo {
   redirectUri: string | null;
 }
 
-export type PostStatus = 'draft' | 'scheduled' | 'publishing' | 'published' | 'failed';
+export type PostStatus = 'draft' | 'pending_approval' | 'scheduled' | 'publishing' | 'published' | 'failed';
+
+export type Role = 'owner' | 'admin' | 'editor' | 'contributor' | 'viewer';
+
+export interface User {
+  id: string;
+  name: string;
+  role: Role;
+  email?: string;
+}
+
+export interface Approval {
+  requestedBy: string;
+  requestedAt: string;
+  decision: 'approved' | 'rejected' | null;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  note: string | null;
+}
+
+export interface Invite {
+  id: string;
+  role: Role;
+  expiresAt: string;
+}
 
 export interface PublishResult {
   accountId: string;
@@ -41,6 +65,8 @@ export interface Post {
   recycledFrom: string | null;
   results: PublishResult[];
   createdAt: string;
+  createdBy: string | null;
+  approval: Approval | null;
   accounts: string[];
 }
 

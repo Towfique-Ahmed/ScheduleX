@@ -1,16 +1,18 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import MediaPicker from '../components/MediaPicker';
 import MediaThumb from '../components/MediaThumb';
 import { platformConfig } from '../utils/platforms';
 import { dayKey, nextFreeSlot } from '../utils/queue';
 
-type When = 'now' | 'later' | 'queue';
+type When = 'now' | 'later' | 'queue' | 'asap';
 
 export default function Compose() {
   const { id } = useParams();
   const { accounts, posts, media, categories, slots, createPost, updatePost } = useApp();
+  const { can } = useAuth();
   const navigate = useNavigate();
   const editing = id ? posts.find(p => p.id === id) : undefined;
 
@@ -20,7 +22,7 @@ export default function Compose() {
   const [categoryId, setCategoryId] = useState<string>('');
   const [evergreen, setEvergreen] = useState(false);
   const [everyDays, setEveryDays] = useState(30);
-  const [when, setWhen] = useState<When>('now');
+  const [when, setWhen] = useState<When>(can.publishDirectly ? 'now' : 'asap');
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('');
   const [picking, setPicking] = useState(false);
@@ -59,13 +61,15 @@ export default function Compose() {
     [slots, posts, id],
   );
   const laterIncomplete = when === 'later' && (!scheduleDate || !scheduleTime);
+  // Contributors can't publish, so their "publish" is a request an editor approves.
+  const requestOnly = !can.publishDirectly;
   const queueUnavailable = when === 'queue' && !queueSlot;
 
   const toggleAccount = (aid: string) => setSelectedAccounts(p => (p.includes(aid) ? p.filter(x => x !== aid) : [...p, aid]));
   const scheduledAt = () =>
     when === 'queue' ? queueSlot!.toISOString() : new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
 
-  const submit = async (action: 'draft' | 'schedule' | 'publish') => {
+  const submit = async (action: 'draft' | 'submit' | 'schedule' | 'publish') => {
     setSubmitting(true);
     setError(null);
     const fields = {
@@ -77,9 +81,9 @@ export default function Compose() {
     };
     try {
       if (editing) {
-        await updatePost(editing.id, { ...fields, action, ...(action === 'schedule' ? { scheduledAt: scheduledAt() } : {}) });
+        await updatePost(editing.id, { ...fields, action, ...(action === 'schedule' || (action === 'submit' && when !== 'asap') ? { scheduledAt: scheduledAt() } : {}) });
       } else {
-        await createPost({ ...fields, action, ...(action === 'schedule' ? { scheduledAt: scheduledAt() } : {}) });
+        await createPost({ ...fields, action, ...(action === 'schedule' || (action === 'submit' && when !== 'asap') ? { scheduledAt: scheduledAt() } : {}) });
       }
       navigate('/posts');
     } catch (err) {
@@ -88,6 +92,9 @@ export default function Compose() {
     }
   };
 
+  if (!can.draft) {
+    return <div className="card empty-state"><p>Your role is read-only, so you can't create posts.</p></div>;
+  }
   if (id && !editing) {
     return <div className="card empty-state"><p>Post not found. <Link to="/posts">Back to posts</Link></p></div>;
   }
@@ -95,8 +102,9 @@ export default function Compose() {
     return <div className="card empty-state"><p>Published posts can't be edited. <Link to="/posts">Back to posts</Link></p></div>;
   }
 
-  const action: 'schedule' | 'publish' = when === 'now' ? 'publish' : 'schedule';
+  const action: 'submit' | 'schedule' | 'publish' = requestOnly ? 'submit' : when === 'now' ? 'publish' : 'schedule';
   const primaryLabel = submitting ? 'Working…'
+    : requestOnly ? '📨 Submit for approval'
     : when === 'now' ? '🚀 Publish Now'
     : when === 'queue' ? '🗓 Add to Queue' : '📅 Schedule Post';
 
@@ -106,6 +114,10 @@ export default function Compose() {
         <h1>{editing ? 'Edit Post' : 'Create Post'}</h1>
         <p className="subtitle">Compose and schedule your content across platforms.</p>
       </div>
+      {editing?.approval?.decision === 'rejected' && editing.approval.note && (
+        <div className="notice notice-error"><span><strong>Changes requested:</strong> {editing.approval.note}</span></div>
+      )}
+      {requestOnly && <div className="notice notice-info"><span>Your posts are sent to an editor for approval before they're published.</span></div>}
 
       <div className="compose-layout">
         <div className="compose-main">
@@ -176,9 +188,12 @@ export default function Compose() {
           <div className="card">
             <div className="card-header"><h2>When</h2></div>
             <div className="schedule-options">
-              {([['now', 'Publish Now'], ['later', 'Pick a date & time'], ['queue', 'Add to queue']] as const).map(([v, label]) => (
+              {(requestOnly
+                ? [['asap', 'As soon as approved'], ['later', 'Request a date & time'], ['queue', 'Request next queue slot']]
+                : [['now', 'Publish Now'], ['later', 'Pick a date & time'], ['queue', 'Add to queue']]
+              ).map(([v, label]) => (
                 <label key={v} className="radio-option">
-                  <input type="radio" name="when" checked={when === v} onChange={() => setWhen(v)} />
+                  <input type="radio" name="when" checked={when === v} onChange={() => setWhen(v as When)} />
                   <span>{label}</span>
                 </label>
               ))}
