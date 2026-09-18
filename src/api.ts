@@ -1,4 +1,4 @@
-import { AnalyticsReport, Category, InboxAccount, InboxItem, Invite, MediaItem, Post, ProviderInfo, Role, Slot, SocialAccount, User } from './types';
+import { SelectableAccount, AnalyticsReport, Category, InboxAccount, InboxItem, Invite, MediaItem, Platform, Post, ProviderInfo, Role, Slot, SocialAccount, User } from './types';
 
 /** Called when any request comes back 401 so the app can drop back to the sign-in screen. */
 let onUnauthorized: (() => void) | null = null;
@@ -54,6 +54,10 @@ export const api = {
   refreshInbox: () => request<{ ok: true }>('/api/inbox/refresh', { method: 'POST' }),
   markRead: (id: string, read: boolean) => request<InboxItem>(`/api/inbox/${id}/read`, json('POST', { read })),
   replyTo: (id: string, text: string) => request<InboxItem>(`/api/inbox/${id}/reply`, json('POST', { text })),
+
+  selection: (id: string) => request<{ platform: Platform; accounts: SelectableAccount[] }>(`/api/connect/${id}`),
+  confirmSelection: (id: string, externalIds: string[]) => request<{ platform: Platform; count: number }>(`/api/connect/${id}/confirm`, json('POST', { externalIds })),
+  cancelSelection: (id: string) => request<void>(`/api/connect/${id}`, { method: 'DELETE' }),
 
   approvePost: (id: string, scheduledAt?: string) => request<Post>(`/api/posts/${id}/approve`, json('POST', { scheduledAt })),
   rejectPost: (id: string, note: string) => request<Post>(`/api/posts/${id}/reject`, json('POST', { note })),

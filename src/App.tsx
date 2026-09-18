@@ -15,6 +15,7 @@ import Team from './pages/Team';
 import Inbox from './pages/Inbox';
 import Approvals from './pages/Approvals';
 import SignIn from './pages/SignIn';
+import ConnectDone from './pages/ConnectDone';
 import { AppProvider, useApp } from './context/AppContext';
 import { useAuth } from './context/AuthContext';
 
@@ -56,6 +57,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/invite/:token" element={<SignIn mode="invite" />} />
+      <Route path="/connect/done" element={<ConnectDone />} />
       <Route path="*" element={
         !user ? (needsSetup ? <SignIn mode="setup" /> : <SignIn mode="login" />)
           // Keyed by user so switching accounts never shows the previous person's data.

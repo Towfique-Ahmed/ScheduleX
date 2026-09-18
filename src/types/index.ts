@@ -6,6 +6,7 @@ export interface SocialAccount {
   username: string;
   displayName: string;
   avatar: string;
+  variant?: string;
   /** False when the platform rejected or expired the token and the user must reconnect. */
   connected: boolean;
 }
@@ -16,6 +17,7 @@ export interface ProviderInfo {
   configured: boolean;
   envVars: string[];
   redirectUri: string | null;
+  variants: { id: string; label: string; description: string }[];
   mediaMimes: string[];
   maxMedia: number;
   requiresMedia: boolean;
@@ -143,4 +145,12 @@ export interface Slot {
   id: string;
   day: number;
   time: string;
+}
+
+export interface SelectableAccount {
+  externalId: string;
+  username: string;
+  displayName: string;
+  avatar: string;
+  alreadyConnected: boolean;
 }

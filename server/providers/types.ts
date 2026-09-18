@@ -48,11 +48,13 @@ export interface Provider {
   envVars: string[];
   usesPkce: boolean;
   configured(): boolean;
-  authUrl(params: { state: string; challenge: string; verifier: string; redirectUri: string }): string;
+  /** Ways to connect this platform (e.g. LinkedIn Profile vs Page). Omitted when there is only one. */
+  variants?: { id: string; label: string; description: string }[];
+  authUrl(params: { state: string; challenge: string; verifier: string; redirectUri: string; variant?: string }): string;
   exchange(params: { code: string; verifier: string; redirectUri: string }): Promise<Tokens>;
   profile(accessToken: string): Promise<Profile>;
   /** Overrides profile() when one login maps to several accounts, each with its own token. */
-  accounts?(tokens: Tokens): Promise<ConnectedAccount[]>;
+  accounts?(tokens: Tokens, variant?: string): Promise<ConnectedAccount[]>;
   refresh?(refreshToken: string): Promise<Tokens>;
   /** MIME types this provider can attach. Empty means text-only. */
   mediaMimes: string[];

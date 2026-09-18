@@ -22,14 +22,16 @@ npm run build && npm start   # one process serves the app and the API
 
 Set `APP_URL` to your public **https** address and `HOST=0.0.0.0` only behind HTTPS. If a reverse proxy sits in front, set `TRUST_PROXY=1` (its hop count), otherwise every visitor looks like the proxy and login rate limiting can't tell them apart. Data lives in `server/data/` (back it up; keep it private).
 
-## Connecting platforms
+## Connecting accounts
 
-Nothing connects until you register a developer app with each platform and put its credentials in `.env`. The **Accounts** page shows the exact callback URL and steps for each one.
+**For people using ScheduleX:** open **Accounts → Connect social account**, pick a platform (for LinkedIn, choose **Profile** or **Page**), and sign in in the window that opens. If the login has several Pages or boards, you choose which to add. No keys or settings are involved.
+
+**For whoever runs ScheduleX (one time per platform):** each platform only lets a registered developer app sign users in, so you register that app once and put its credentials in `.env`. Everyone using your ScheduleX then connects with a click. This is exactly how tools like Publer and Buffer work; they just registered the apps themselves. A platform without credentials shows a **Needs setup** badge in the connect dialog, with the callback URL to register.
 
 | Platform | Env vars | Notes |
 |---|---|---|
 | X | `X_CLIENT_ID` (`X_CLIENT_SECRET` if confidential) | Free tier has a small monthly post limit. |
-| LinkedIn | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Add "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". Tokens last ~60 days, then reconnect. No analytics API for personal profiles. |
+| LinkedIn | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Add "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". Company **Pages** additionally need LinkedIn's Community Management API product (LinkedIn approves it). Tokens last ~60 days, then reconnect. No analytics API for personal profiles. |
 | Facebook, Instagram | `META_APP_ID`, `META_APP_SECRET` | One login connects all your Pages and linked Instagram accounts. Needs Meta app review for other people's accounts. Instagram needs `PUBLIC_URL` (public https) and JPEG images. |
 | TikTok | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET` | https redirect required. Posts are private until TikTok audits your app. MP4 only. |
 | Pinterest | `PINTEREST_APP_ID`, `PINTEREST_APP_SECRET` | Each board is its own account. Trial apps: set `PINTEREST_API_BASE` to the sandbox. |

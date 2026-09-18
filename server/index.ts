@@ -9,6 +9,7 @@ import { authRouter, originCheck, requireRole, requireUser, sessionMiddleware, t
 import { config, redirectUri } from './config.ts';
 import { can } from './roles.ts';
 import { publishPost, storeTokens } from './publisher.ts';
+import type { ConnectedAccount } from './providers/types.ts';
 import { allPlatforms, providers } from './providers/index.ts';
 import { startScheduler } from './scheduler.ts';
 import { data, mediaDir, save, Platform, StoredAccount, StoredMedia, StoredPost, User } from './store.ts';
@@ -36,89 +37,135 @@ app.get('/api/media/file/:filename', (req, res) => {
 const publicAccount = ({ accessToken, refreshToken, ...rest }: StoredAccount) => ({ ...rest, connected: !rest.needsReconnect });
 
 // ---- OAuth ------------------------------------------------------------------
-interface Pending { platform: Platform; verifier: string; expires: number; userId: string }
+interface Pending { platform: Platform; verifier: string; expires: number; userId: string; popup: boolean; variant?: string }
 const pending = new Map<string, Pending>();
 
+/** Accounts a login returned, waiting for the admin to choose which to add. Tokens stay here, never sent to the browser. */
+interface Selection { userId: string; platform: Platform; variant?: string; accounts: ConnectedAccount[]; expires: number }
+const selections = new Map<string, Selection>();
+
 const b64url = (b: Buffer) => b.toString('base64url');
-const back = (params: Record<string, string>) => `${config.appUrl}/accounts?${new URLSearchParams(params)}`;
+/** OAuth ends on this page. In a popup it tells the opener and closes; otherwise it forwards to Accounts. */
+const done = (params: Record<string, string>, popup = false) =>
+  `${config.appUrl}/connect/done?${new URLSearchParams({ ...params, popup: popup ? '1' : '0' })}`;
 
 /** OAuth endpoints are browser navigations, so failures redirect back with a message instead of returning JSON. */
-function adminOrRedirect(res: express.Response): User | null {
+function adminOrRedirect(res: express.Response, popup = false): User | null {
   const user = res.locals.user as User | undefined;
-  if (!user) { res.redirect(back({ error: 'Sign in to connect an account.' })); return null; }
-  if (!can.manageAccounts(user.role)) { res.redirect(back({ error: 'Only admins can connect accounts.' })); return null; }
+  if (!user) { res.redirect(done({ error: 'Sign in to connect an account.' }, popup)); return null; }
+  if (!can.manageAccounts(user.role)) { res.redirect(done({ error: 'Only admins can connect accounts.' }, popup)); return null; }
   return user;
 }
 
 app.get('/api/auth/:platform/start', (req, res) => {
-  const user = adminOrRedirect(res);
+  const popup = req.query.popup === '1';
+  const user = adminOrRedirect(res, popup);
   if (!user) return;
   const platform = req.params.platform as Platform;
   const provider = providers[platform];
-  if (!provider) return res.redirect(back({ error: 'This platform is not supported yet.' }));
-  if (!provider.configured()) return res.redirect(back({ error: `${provider.name} is not configured. Set ${provider.envVars.join(', ')} on the server.` }));
+  if (!provider) return res.redirect(done({ error: 'This platform is not supported yet.' }, popup));
+  if (!provider.configured()) return res.redirect(done({ error: `${provider.name} is not set up on this server yet. An admin needs to add its developer credentials.` }, popup));
+  const variant = typeof req.query.variant === 'string' ? req.query.variant : undefined;
+  if (variant && !provider.variants?.some(v => v.id === variant)) return res.redirect(done({ error: 'Unknown connection type.' }, popup));
 
   for (const [k, v] of pending) if (v.expires < Date.now()) pending.delete(k);
   const state = b64url(crypto.randomBytes(24));
   const verifier = b64url(crypto.randomBytes(48));
   const challenge = b64url(crypto.createHash('sha256').update(verifier).digest());
-  pending.set(state, { platform, verifier, userId: user.id, expires: Date.now() + 10 * 60 * 1000 });
-  res.redirect(provider.authUrl({ state, challenge, verifier, redirectUri: redirectUri(platform) }));
+  pending.set(state, { platform, verifier, userId: user.id, popup, variant, expires: Date.now() + 10 * 60 * 1000 });
+  res.redirect(provider.authUrl({ state, challenge, verifier, variant, redirectUri: redirectUri(platform) }));
 });
 
+/** Adds or refreshes accounts (matched by platform + external id) with their tokens. */
+function saveConnected(platform: Platform, list: ConnectedAccount[], variant?: string) {
+  for (const { profile, ...t } of list) {
+    const existing = data().accounts.find(a => a.platform === platform && a.externalId === profile.externalId);
+    const account: StoredAccount = existing ?? {
+      id: crypto.randomUUID(), platform, externalId: profile.externalId, username: profile.username,
+      displayName: profile.displayName, avatar: profile.avatar, accessToken: '', refreshToken: null,
+      expiresAt: null, needsReconnect: false, connectedAt: new Date().toISOString(),
+    };
+    Object.assign(account, { username: profile.username, displayName: profile.displayName, avatar: profile.avatar, ...(variant ? { variant } : {}) });
+    storeTokens(account, t);
+    if (!existing) data().accounts.push(account);
+  }
+  save();
+}
+
 app.get('/api/auth/:platform/callback', async (req, res) => {
-  const user = adminOrRedirect(res);
+  const { code, state, error, error_description } = req.query as Record<string, string | undefined>;
+  const entry = state ? pending.get(state) : undefined;
+  const popup = !!entry?.popup;
+  const user = adminOrRedirect(res, popup);
   if (!user) return;
   const platform = req.params.platform as Platform;
   const provider = providers[platform];
-  const { code, state, error, error_description } = req.query as Record<string, string | undefined>;
-  const entry = state ? pending.get(state) : undefined;
   if (state) pending.delete(state);
 
   if (!provider || !entry || entry.platform !== platform || entry.userId !== user.id || entry.expires < Date.now()) {
-    return res.redirect(back({ error: 'The connection attempt expired or was invalid. Please try again.' }));
+    return res.redirect(done({ error: 'The connection attempt expired or was invalid. Please try again.' }, popup));
   }
-  if (error || !code) return res.redirect(back({ error: error_description ?? error ?? 'Authorization was cancelled.' }));
+  if (error || !code) return res.redirect(done({ error: error_description ?? error ?? 'Authorization was cancelled.' }, popup));
 
   try {
     const tokens = await provider.exchange({ code, verifier: entry.verifier, redirectUri: redirectUri(platform) });
-    // Most platforms map one login to one account; Meta and Pinterest yield several (Pages, boards).
+    // Most platforms map one login to one account; Meta, Pinterest and LinkedIn Pages yield several.
     const connected = provider.accounts
-      ? await provider.accounts(tokens)
+      ? await provider.accounts(tokens, entry.variant)
       : [{ ...tokens, profile: await provider.profile(tokens.accessToken) }];
-    for (const { profile, ...t } of connected) {
-      const existing = data().accounts.find(a => a.platform === platform && a.externalId === profile.externalId);
-      const account: StoredAccount = existing ?? {
-        id: crypto.randomUUID(),
-        platform,
-        externalId: profile.externalId,
-        username: profile.username,
-        displayName: profile.displayName,
-        avatar: profile.avatar,
-        accessToken: '',
-        refreshToken: null,
-        expiresAt: null,
-        needsReconnect: false,
-        connectedAt: new Date().toISOString(),
-      };
-      Object.assign(account, { username: profile.username, displayName: profile.displayName, avatar: profile.avatar });
-      storeTokens(account, t);
-      if (!existing) data().accounts.push(account);
+    if (connected.length > 1) {
+      // Let the admin choose which Pages/boards to add instead of connecting everything.
+      const id = b64url(crypto.randomBytes(18));
+      for (const [k, v] of selections) if (v.expires < Date.now()) selections.delete(k);
+      selections.set(id, { userId: user.id, platform, variant: entry.variant, accounts: connected, expires: Date.now() + 10 * 60 * 1000 });
+      return res.redirect(done({ select: id, platform }, popup));
     }
-    save();
-    res.redirect(back({ connected: platform, count: String(connected.length) }));
-    return;
-
+    saveConnected(platform, connected, entry.variant);
+    res.redirect(done({ connected: platform, count: String(connected.length) }, popup));
   } catch (err) {
     console.error(`[auth:${platform}]`, err);
-    res.redirect(back({ error: err instanceof Error ? err.message : 'Connection failed.' }));
+    res.redirect(done({ error: err instanceof Error ? err.message : 'Connection failed.' }, popup));
   }
 });
-
 
 // ---- Everything below requires a signed-in user ----
 app.use('/api', requireUser);
 app.use('/api', teamRouter);
+
+// ---- Choosing which accounts to add after a multi-account login ----
+const ownSelection = (req: express.Request, res: express.Response) => {
+  const s = selections.get(String(req.params.id));
+  if (!s || s.expires < Date.now() || s.userId !== userFrom(res).id) return null;
+  return s;
+};
+
+app.get('/api/connect/:id', requireRole(can.manageAccounts), (req, res) => {
+  const s = ownSelection(req, res);
+  if (!s) return res.status(404).json({ error: 'This selection expired. Start the connection again.' });
+  res.json({
+    platform: s.platform,
+    accounts: s.accounts.map(({ profile }) => ({
+      externalId: profile.externalId, username: profile.username, displayName: profile.displayName, avatar: profile.avatar,
+      alreadyConnected: data().accounts.some(a => a.platform === s.platform && a.externalId === profile.externalId),
+    })),
+  });
+});
+
+app.post('/api/connect/:id/confirm', requireRole(can.manageAccounts), (req, res) => {
+  const s = ownSelection(req, res);
+  if (!s) return res.status(404).json({ error: 'This selection expired. Start the connection again.' });
+  const ids = Array.isArray(req.body?.externalIds) ? req.body.externalIds.map(String) : [];
+  const chosen = s.accounts.filter(a => ids.includes(a.profile.externalId));
+  if (chosen.length === 0) return res.status(400).json({ error: 'Choose at least one account to connect.' });
+  saveConnected(s.platform, chosen, s.variant);
+  selections.delete(String(req.params.id));
+  res.json({ platform: s.platform, count: chosen.length });
+});
+
+app.delete('/api/connect/:id', requireRole(can.manageAccounts), (req, res) => {
+  if (ownSelection(req, res)) selections.delete(String(req.params.id));
+  res.status(204).end();
+});
 
 // ---- Providers ------------------------------------------------------------
 app.get('/api/providers', (_req, res) => {
@@ -131,6 +178,7 @@ app.get('/api/providers', (_req, res) => {
         configured: !!p?.configured(),
         envVars: p?.envVars ?? [],
         redirectUri: p ? redirectUri(id) : null,
+        variants: p?.variants ?? [],
         mediaMimes: p?.mediaMimes ?? [],
         maxMedia: p?.maxMedia ?? 0,
         requiresMedia: !!p?.requiresMedia,

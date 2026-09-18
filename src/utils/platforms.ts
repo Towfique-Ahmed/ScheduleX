@@ -18,7 +18,10 @@ export function formatNumber(n: number): string {
 /** Extra setup guidance shown in the "Set up" dialog, beyond the callback URL and env vars. */
 export const SETUP_NOTES: Partial<Record<Platform, string[]>> = {
   twitter: ['Enable OAuth 2.0 with "Read and write" permissions. Free-tier apps have a low monthly post limit.'],
-  linkedin: ['Add the products "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn".'],
+  linkedin: [
+    'Add the products "Sign In with LinkedIn using OpenID Connect" and "Share on LinkedIn".',
+    'To post to company Pages, also request the Community Management API product (LinkedIn reviews it).',
+  ],
   facebook: [
     'Create a Meta app (type: Business) and add the Facebook Login product.',
     'One login connects every Page you manage. Live use by other people requires Meta app review.',

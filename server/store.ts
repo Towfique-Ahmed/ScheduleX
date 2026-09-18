@@ -16,6 +16,8 @@ export interface StoredAccount {
   expiresAt: string | null;
   needsReconnect: boolean;
   connectedAt: string;
+  /** How it was connected (LinkedIn: 'profile' | 'page'); needed to reconnect the same way. */
+  variant?: string;
   metricsError?: string | null;
   metricsAt?: string | null;
   inboxError?: string | null;

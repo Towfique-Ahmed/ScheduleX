@@ -1,41 +1,47 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import ConnectDialog, { ConnectResult } from '../components/ConnectDialog';
 import { useApp } from '../context/AppContext';
 import { useAuth } from '../context/AuthContext';
-import { platformConfig, SETUP_NOTES } from '../utils/platforms';
-import { ProviderInfo } from '../types';
+import { openConnectWindow, connectInThisTab } from '../utils/connect';
+import { platformConfig } from '../utils/platforms';
+import { Platform, SocialAccount } from '../types';
 
 export default function Accounts() {
-  const { accounts, providers, disconnectAccount, refresh } = useApp();
+  const { accounts, disconnectAccount, refresh } = useApp();
   const { can } = useAuth();
   const [params, setParams] = useSearchParams();
-  const [notice, setNotice] = useState<{ kind: 'success' | 'error'; text: string } | null>(null);
-  const [setupFor, setSetupFor] = useState<ProviderInfo | null>(null);
+  const [notice, setNotice] = useState<ConnectResult | null>(null);
+  const [dialog, setDialog] = useState<{ open: boolean; resume?: { platform: Platform; popup: Window | null }; selectId?: string }>({ open: false });
 
-  // The OAuth callback redirects back here with ?connected=<platform> or ?error=<message>.
+  // Full-page fallback (popups blocked): the finish page forwards here with ?connected / ?error / ?select.
   useEffect(() => {
-    const connected = params.get('connected');
+    const connected = params.get('connected') as Platform | null;
     const error = params.get('error');
+    const select = params.get('select');
     const count = Number(params.get('count') ?? 1);
-    if (!connected && !error) return;
-    setNotice(connected
-      ? { kind: 'success', text: `${count > 1 ? `${count} ` : ''}${platformConfig[connected as keyof typeof platformConfig]?.name ?? connected} account${count > 1 ? 's' : ''} connected.` }
-      : { kind: 'error', text: `Connection problem: ${error!.slice(0, 300)}` });
+    if (!connected && !error && !select) return;
+    if (select) setDialog({ open: true, selectId: select });
+    else if (connected) setNotice({ kind: 'success', text: `${count > 1 ? `${count} ` : ''}${platformConfig[connected]?.name ?? connected} account${count > 1 ? 's' : ''} connected.` });
+    else setNotice({ kind: 'error', text: `Connection problem: ${error!.slice(0, 300)}` });
     setParams({}, { replace: true });
     void refresh();
   }, [params, setParams, refresh]);
 
-  const connect = (p: ProviderInfo) => {
-    if (!p.configured) return setSetupFor(p);
-    // Full-page navigation: the server redirects to the platform's consent screen.
-    window.location.href = `/api/auth/${p.platform}/start`;
+  // Reconnect reopens the sign-in the same way the account was first connected (e.g. a LinkedIn Page).
+  const reconnect = (a: SocialAccount) => {
+    const popup = openConnectWindow(a.platform, a.variant);
+    if (!popup) return connectInThisTab(a.platform, a.variant);
+    setDialog({ open: true, resume: { platform: a.platform, popup } });
   };
+
+  const finished = (r: ConnectResult) => { setNotice(r); setDialog({ open: false }); };
 
   return (
     <div className="accounts-page">
       <div className="page-header">
         <h1>Social Accounts</h1>
-        <p className="subtitle">Connect your real accounts. ScheduleX posts on your behalf through each platform's official API.</p>
+        <p className="subtitle">Connect the accounts you post to. ScheduleX publishes through each platform's official API.</p>
       </div>
 
       {notice && (
@@ -45,14 +51,22 @@ export default function Accounts() {
         </div>
       )}
 
-      <h2 className="section-title">Connected accounts</h2>
+      {can.manageAccounts && (
+        <div className="toolbar-row">
+          <button className="btn btn-primary" onClick={() => { setNotice(null); setDialog({ open: true }); }}>＋ Connect social account</button>
+        </div>
+      )}
+
       {accounts.length === 0 ? (
-        <div className="card empty-state"><p>No accounts connected yet. Pick a platform below to get started.</p></div>
+        <div className="card empty-state">
+          <p><strong>No social accounts found</strong></p>
+          <p>{can.manageAccounts ? "You haven't connected any accounts yet." : 'An admin needs to connect accounts before you can post.'}</p>
+          {can.manageAccounts && <button className="btn btn-outline btn-sm" onClick={() => { setNotice(null); setDialog({ open: true }); }}>Connect social account</button>}
+        </div>
       ) : (
         <div className="accounts-grid">
           {accounts.map(account => {
             const config = platformConfig[account.platform];
-            const provider = providers.find(p => p.platform === account.platform);
             return (
               <div key={account.id} className={`card account-card ${account.connected ? 'connected' : ''}`}>
                 <div className="account-header" style={{ borderTopColor: config.color }}>
@@ -61,7 +75,7 @@ export default function Accounts() {
                     : <div className="account-icon" style={{ background: config.color }}>{config.icon}</div>}
                   <div className="account-info">
                     <h3>{account.displayName}</h3>
-                    <span className="account-username">{config.name} · {account.username}</span>
+                    <span className="account-username">{config.name}{account.variant === 'page' ? ' Page' : ''} · {account.username}</span>
                   </div>
                 </div>
                 <div className="account-body">
@@ -69,69 +83,23 @@ export default function Accounts() {
                     {account.connected ? '● Connected' : '⚠ Reconnect needed'}
                   </span>
                 </div>
-                <div className="account-footer">
-                  {can.manageAccounts && !account.connected && provider && (
-                    <button className="btn btn-sm btn-primary" onClick={() => connect(provider)}>Reconnect</button>
-                  )}
-                  {can.manageAccounts && <button
-                    className="btn btn-sm btn-danger"
-                    onClick={() => { if (confirm(`Disconnect ${account.displayName}? Scheduled posts for it will fail.`)) void disconnectAccount(account.id); }}
-                  >
-                    Disconnect
-                  </button>}
-                </div>
+                {can.manageAccounts && (
+                  <div className="account-footer">
+                    {!account.connected && <button className="btn btn-sm btn-primary" onClick={() => reconnect(account)}>Reconnect</button>}
+                    <button className="btn btn-sm btn-danger"
+                      onClick={() => { if (confirm(`Disconnect ${account.displayName}? Scheduled posts for it will fail.`)) void disconnectAccount(account.id); }}>
+                      Disconnect
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {can.manageAccounts ? <><h2 className="section-title">Add an account</h2>
-      <div className="accounts-grid">
-        {providers.map(p => {
-          const config = platformConfig[p.platform];
-          return (
-            <div key={p.platform} className="card account-card">
-              <div className="account-header" style={{ borderTopColor: config.color }}>
-                <div className="account-icon" style={{ background: config.color }}>{config.icon}</div>
-                <div className="account-info">
-                  <h3>{config.name}</h3>
-                  <span className="account-username">
-                    {!p.supported ? 'Coming soon' : p.configured ? 'Ready to connect' : 'Setup required'}
-                  </span>
-                </div>
-              </div>
-              <div className="account-footer">
-                <button className="btn btn-sm btn-primary" disabled={!p.supported} onClick={() => connect(p)}>
-                  {p.supported ? (p.configured ? 'Connect account' : 'Set up') : 'Coming soon'}
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div></> : <p className="hint">Only admins can connect or disconnect accounts.</p>}
-
-      {setupFor && (
-        <div className="modal-backdrop" onClick={() => setSetupFor(null)}>
-          <div className="modal card" role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
-            <div className="card-header">
-              <h2>Set up {platformConfig[setupFor.platform].name}</h2>
-              <button className="notice-close" onClick={() => setSetupFor(null)} aria-label="Close">×</button>
-            </div>
-            <ol className="setup-steps">
-              <li>Create a developer app on the {platformConfig[setupFor.platform].name} developer portal.</li>
-              <li>Add this redirect / callback URL to the app:<code className="setup-code">{setupFor.redirectUri}</code></li>
-              <li>Copy the app credentials into <code>.env</code> in the project root:
-                <code className="setup-code">{setupFor.envVars.map(v => `${v}=...`).join('\n')}</code>
-              </li>
-              <li>Restart <code>npm run dev</code>, then click Connect account.</li>
-            </ol>
-            {(SETUP_NOTES[setupFor.platform] ?? []).length > 0 && (
-              <ul className="setup-notes">{SETUP_NOTES[setupFor.platform]!.map(n => <li key={n}>{n}</li>)}</ul>
-            )}
-            <p className="hint">See <code>.env.example</code> for the exact scopes and products each platform needs.</p>
-          </div>
-        </div>
+      {dialog.open && (
+        <ConnectDialog resume={dialog.resume} selectId={dialog.selectId} onClose={() => setDialog({ open: false })} onResult={finished} />
       )}
     </div>
   );

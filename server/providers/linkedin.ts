@@ -1,6 +1,6 @@
 import { config } from '../config.ts';
 import fs from 'node:fs';
-import { LocalMedia, Provider, ProviderError, readJson } from './types.ts';
+import { ConnectedAccount, LocalMedia, Provider, ProviderError, readJson } from './types.ts';
 
 const clientId = () => process.env.LINKEDIN_CLIENT_ID ?? '';
 const clientSecret = () => process.env.LINKEDIN_CLIENT_SECRET ?? '';
@@ -11,6 +11,10 @@ const restHeaders = (accessToken: string) => ({
   'X-Restli-Protocol-Version': '2.0.0',
   'LinkedIn-Version': config.linkedinApiVersion,
 });
+
+/** Page accounts are stored as "org:<id>"; anything else is a member's personal profile id. */
+const authorUrn = (externalId: string) =>
+  externalId.startsWith('org:') ? `urn:li:organization:${externalId.slice(4)}` : `urn:li:person:${externalId}`;
 
 // Two-step upload: ask LinkedIn for an upload URL + image URN, then PUT the bytes.
 async function uploadImage(accessToken: string, ownerUrn: string, m: LocalMedia): Promise<string> {
@@ -36,16 +40,21 @@ export const linkedin: Provider = {
   name: 'LinkedIn',
   envVars: ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'],
   usesPkce: false,
+  variants: [
+    { id: 'profile', label: 'Profile', description: 'Post to your personal LinkedIn profile' },
+    { id: 'page', label: 'Page', description: 'Post to a company Page you administer' },
+  ],
   mediaMimes: ['image/jpeg', 'image/png', 'image/gif'],
   maxMedia: 9,
   configured: () => !!clientId() && !!clientSecret(),
 
-  authUrl: ({ state, redirectUri }) => {
+  authUrl: ({ state, redirectUri, variant }) => {
     const q = new URLSearchParams({
       response_type: 'code',
       client_id: clientId(),
       redirect_uri: redirectUri,
-      scope: 'openid profile w_member_social',
+      // Company Pages need LinkedIn's Community Management API product for the organization scopes.
+      scope: variant === 'page' ? 'openid profile r_organization_admin w_organization_social' : 'openid profile w_member_social',
       state,
     });
     return `https://www.linkedin.com/oauth/v2/authorization?${q}`;
@@ -81,8 +90,26 @@ export const linkedin: Provider = {
     };
   },
 
+  accounts: async (tokens, variant) => {
+    if (variant !== 'page') return [{ ...tokens, profile: await linkedin.profile(tokens.accessToken) }];
+    const headers = restHeaders(tokens.accessToken);
+    const acl = await fetch('https://api.linkedin.com/rest/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&state=APPROVED', { headers });
+    const aclJson = await readJson(acl);
+    if (acl.status === 401) throw new ProviderError('LinkedIn rejected the access token', true);
+    if (!acl.ok) throw new ProviderError(`Could not list your LinkedIn Pages: ${aclJson.message ?? acl.status}. The app needs the Community Management API product.`);
+    const ids: string[] = (aclJson.elements ?? []).map((e: any) => String(e.organization).split(':').pop()).filter(Boolean);
+    if (ids.length === 0) throw new ProviderError('No LinkedIn Pages found. You must be an administrator of a Page to connect it.');
+    const out: ConnectedAccount[] = [];
+    for (const id of [...new Set(ids)]) {
+      const org = await readJson(await fetch(`https://api.linkedin.com/rest/organizations/${id}`, { headers }));
+      const name = org.localizedName ?? `Page ${id}`;
+      out.push({ ...tokens, profile: { externalId: `org:${id}`, username: org.vanityName ? `linkedin.com/company/${org.vanityName}` : name, displayName: name, avatar: '' } });
+    }
+    return out;
+  },
+
   publish: async ({ accessToken, externalId, content, media }) => {
-    const author = `urn:li:person:${externalId}`;
+    const author = authorUrn(externalId);
     const images: string[] = [];
     for (const m of media) images.push(await uploadImage(accessToken, author, m));
     const mediaContent =
