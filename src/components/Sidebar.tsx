@@ -6,6 +6,9 @@ const navItems = [
   { path: '/compose', label: 'Create Post', icon: '✏️' },
   { path: '/posts', label: 'Posts', icon: '📝' },
   { path: '/calendar', label: 'Calendar', icon: '📅' },
+  { path: '/queue', label: 'Queue', icon: '🗓️' },
+  { path: '/library', label: 'Media Library', icon: '🖼️' },
+  { path: '/categories', label: 'Categories', icon: '🏷️' },
   { path: '/analytics', label: 'Analytics', icon: '📈' },
   { path: '/accounts', label: 'Accounts', icon: '👥' },
 ];

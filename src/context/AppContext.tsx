@@ -1,83 +1,133 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { Post, SocialAccount, Platform, AnalyticsData } from '../types';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { api, CreatePostInput, PostInput } from '../api';
+import { AnalyticsData, Category, MediaItem, Post, ProviderInfo, Slot, SocialAccount } from '../types';
 
 interface AppState {
   posts: Post[];
   accounts: SocialAccount[];
+  providers: ProviderInfo[];
+  media: MediaItem[];
+  categories: Category[];
+  slots: Slot[];
   analytics: AnalyticsData[];
-  addPost: (post: Omit<Post, 'id' | 'createdAt'>) => void;
-  updatePost: (id: string, updates: Partial<Post>) => void;
-  deletePost: (id: string) => void;
-  toggleAccount: (id: string) => void;
+  loading: boolean;
+  error: string | null;
+  createPost: (input: CreatePostInput) => Promise<Post>;
+  updatePost: (id: string, patch: Partial<PostInput> & { action?: 'draft' | 'schedule' | 'publish'; scheduledAt?: string }) => Promise<Post>;
+  retryPost: (id: string) => Promise<void>;
+  deletePost: (id: string) => Promise<void>;
+  disconnectAccount: (id: string) => Promise<void>;
+  uploadMedia: (file: File) => Promise<MediaItem>;
+  deleteMedia: (id: string) => Promise<void>;
+  createCategory: (name: string, color: string) => Promise<void>;
+  deleteCategory: (id: string) => Promise<void>;
+  saveSlots: (slots: { day: number; time: string }[]) => Promise<void>;
+  refresh: () => Promise<void>;
 }
-
-const defaultAccounts: SocialAccount[] = [
-  { id: '1', platform: 'twitter', username: '@schedulex', displayName: 'ScheduleX', avatar: '', connected: true },
-  { id: '2', platform: 'facebook', username: 'ScheduleX', displayName: 'ScheduleX Page', avatar: '', connected: true },
-  { id: '3', platform: 'instagram', username: '@schedulex', displayName: 'ScheduleX', avatar: '', connected: false },
-  { id: '4', platform: 'linkedin', username: 'ScheduleX', displayName: 'ScheduleX Company', avatar: '', connected: true },
-  { id: '5', platform: 'tiktok', username: '@schedulex', displayName: 'ScheduleX', avatar: '', connected: false },
-  { id: '6', platform: 'pinterest', username: 'schedulex', displayName: 'ScheduleX', avatar: '', connected: false },
-];
-
-const defaultAnalytics: AnalyticsData[] = [
-  { platform: 'twitter', followers: 12400, engagement: 4.2, impressions: 89000, clicks: 3200, trend: 12 },
-  { platform: 'facebook', followers: 8900, engagement: 3.1, impressions: 45000, clicks: 1800, trend: -3 },
-  { platform: 'linkedin', followers: 5600, engagement: 5.8, impressions: 32000, clicks: 2100, trend: 22 },
-  { platform: 'instagram', followers: 15200, engagement: 6.1, impressions: 120000, clicks: 4500, trend: 8 },
-];
-
-const samplePosts: Post[] = [
-  {
-    id: '1', content: 'Excited to announce our new feature launch! Stay tuned for more updates. #product #launch',
-    platforms: ['twitter', 'linkedin'], scheduledAt: new Date(Date.now() + 86400000).toISOString(),
-    status: 'scheduled', mediaUrls: [], createdAt: new Date().toISOString(), accounts: ['1', '4'],
-  },
-  {
-    id: '2', content: 'Behind the scenes of our team building session. Great vibes all around!',
-    platforms: ['facebook', 'instagram'], scheduledAt: null,
-    status: 'published', mediaUrls: [], createdAt: new Date(Date.now() - 86400000).toISOString(), accounts: ['2', '3'],
-  },
-  {
-    id: '3', content: 'Tips for growing your social media presence in 2026:\n\n1. Be consistent\n2. Engage with your audience\n3. Use analytics to guide decisions',
-    platforms: ['twitter', 'facebook', 'linkedin'], scheduledAt: new Date(Date.now() + 172800000).toISOString(),
-    status: 'scheduled', mediaUrls: [], createdAt: new Date().toISOString(), accounts: ['1', '2', '4'],
-  },
-  {
-    id: '4', content: 'Check out our latest blog post on content strategy!',
-    platforms: ['twitter'], scheduledAt: null,
-    status: 'draft', mediaUrls: [], createdAt: new Date(Date.now() - 3600000).toISOString(), accounts: ['1'],
-  },
-];
 
 const AppContext = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [posts, setPosts] = useState<Post[]>(samplePosts);
-  const [accounts, setAccounts] = useState<SocialAccount[]>(defaultAccounts);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const addPost = useCallback((post: Omit<Post, 'id' | 'createdAt'>) => {
-    setPosts(prev => [...prev, {
-      ...post,
-      id: Date.now().toString(),
-      createdAt: new Date().toISOString(),
-    }]);
+  const refresh = useCallback(async () => {
+    try {
+      const [p, a, pr, m, c, s] = await Promise.all([
+        api.posts(), api.accounts(), api.providers(), api.media(), api.categories(), api.slots(),
+      ]);
+      setPosts(p); setAccounts(a); setProviders(pr); setMedia(m); setCategories(c); setSlots(s);
+      setError(null);
+    } catch {
+      setError('Cannot reach the ScheduleX server. Start it with `npm run dev`.');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const updatePost = useCallback((id: string, updates: Partial<Post>) => {
-    setPosts(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
+  useEffect(() => {
+    void refresh();
+    // Scheduled posts are published server-side; poll so status changes show up.
+    const timer = setInterval(() => void refresh(), 15_000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
+  const createPost = useCallback(async (input: CreatePostInput) => {
+    const post = await api.createPost(input);
+    setPosts(prev => [...prev, post]);
+    return post;
   }, []);
 
-  const deletePost = useCallback((id: string) => {
+  const updatePost = useCallback(async (id: string, patch: Parameters<typeof api.updatePost>[1]) => {
+    const post = await api.updatePost(id, patch);
+    setPosts(prev => prev.map(p => (p.id === id ? post : p)));
+    return post;
+  }, []);
+
+  const retryPost = useCallback(async (id: string) => {
+    const post = await api.retryPost(id);
+    setPosts(prev => prev.map(p => (p.id === id ? post : p)));
+  }, []);
+
+  const deletePost = useCallback(async (id: string) => {
+    await api.deletePost(id);
     setPosts(prev => prev.filter(p => p.id !== id));
   }, []);
 
-  const toggleAccount = useCallback((id: string) => {
-    setAccounts(prev => prev.map(a => a.id === id ? { ...a, connected: !a.connected } : a));
+  const disconnectAccount = useCallback(async (id: string) => {
+    await api.disconnectAccount(id);
+    setAccounts(prev => prev.filter(a => a.id !== id));
   }, []);
 
+  const uploadMedia = useCallback(async (file: File) => {
+    const item = await api.uploadMedia(file);
+    setMedia(prev => [item, ...prev]);
+    return item;
+  }, []);
+
+  const deleteMedia = useCallback(async (id: string) => {
+    await api.deleteMedia(id);
+    setMedia(prev => prev.filter(m => m.id !== id));
+  }, []);
+
+  const createCategory = useCallback(async (name: string, color: string) => {
+    const c = await api.createCategory(name, color);
+    setCategories(prev => [...prev, c]);
+  }, []);
+
+  const deleteCategory = useCallback(async (id: string) => {
+    await api.deleteCategory(id);
+    setCategories(prev => prev.filter(c => c.id !== id));
+    setPosts(prev => prev.map(p => (p.categoryId === id ? { ...p, categoryId: null } : p)));
+  }, []);
+
+  const saveSlots = useCallback(async (next: { day: number; time: string }[]) => {
+    setSlots(await api.saveSlots(next));
+  }, []);
+
+  // Not backed by real data yet: derived from connected accounts with placeholder numbers.
+  const analytics = useMemo<AnalyticsData[]>(
+    () =>
+      [...new Set(accounts.map(a => a.platform))].map(platform => ({
+        platform, followers: 0, engagement: 0, impressions: 0, clicks: 0, trend: 0,
+      })),
+    [accounts],
+  );
+
   return (
-    <AppContext.Provider value={{ posts, accounts, analytics: defaultAnalytics, addPost, updatePost, deletePost, toggleAccount }}>
+    <AppContext.Provider
+      value={{
+        posts, accounts, providers, media, categories, slots, analytics, loading, error,
+        createPost, updatePost, retryPost, deletePost, disconnectAccount,
+        uploadMedia, deleteMedia, createCategory, deleteCategory, saveSlots, refresh,
+      }}
+    >
       {children}
     </AppContext.Provider>
   );

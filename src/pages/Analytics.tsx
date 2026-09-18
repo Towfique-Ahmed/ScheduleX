@@ -6,7 +6,7 @@ export default function Analytics() {
   const { analytics } = useApp();
 
   const totalFollowers = analytics.reduce((sum, a) => sum + a.followers, 0);
-  const avgEngagement = (analytics.reduce((sum, a) => sum + a.engagement, 0) / analytics.length).toFixed(1);
+  const avgEngagement = (analytics.length ? analytics.reduce((sum, a) => sum + a.engagement, 0) / analytics.length : 0).toFixed(1);
   const totalImpressions = analytics.reduce((sum, a) => sum + a.impressions, 0);
   const totalClicks = analytics.reduce((sum, a) => sum + a.clicks, 0);
 
@@ -15,6 +15,10 @@ export default function Analytics() {
       <div className="page-header">
         <h1>Analytics</h1>
         <p className="subtitle">Track your social media performance across platforms.</p>
+      </div>
+
+      <div className="notice notice-info">
+        Live platform metrics aren't wired up yet, so these figures are placeholders. Real per-account analytics are planned next.
       </div>
 
       <div className="stats-grid">
